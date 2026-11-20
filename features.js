@@ -79,9 +79,10 @@ function occurs(e, ds) {
 }
 export const eventsOn = ds => (C.st.events || []).filter(e => occurs(e, ds)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 const evColor = e => e.for_user ? C.colorOf(e.for_user) : SHARED_COLOR;
+const timeText = e => e.time ? e.time.slice(0, 5) + (e.end_time ? '〜' + e.end_time.slice(0, 5) : '') : '終日';
 const repText = r => !r ? '' : r.startsWith('weekly') ? `毎週${r.split(':')[1].split(',').map(n => W[n]).join('・')}曜日` : `毎月${r.split(':')[1]}日`;
 export const evRow = e => `<button class="row" data-act="evOpen" data-id="${e.id}"><span class="dot" style="background:${evColor(e)}"></span>
-  <span class="main"><span class="name">${C.esc(e.title)}</span><span class="sub">${e.time ? e.time.slice(0, 5) : '終日'}・${e.for_user ? C.esc(C.nameOf(e.for_user)) : 'ふたり'}${e.repeat_rule ? '・くり返し' : ''}${e.is_private ? '・自分だけ' : ''}</span></span></button>`;
+  <span class="main"><span class="name">${C.esc(e.title)}</span><span class="sub">${timeText(e)}・${e.for_user ? C.esc(C.nameOf(e.for_user)) : 'ふたり'}${e.repeat_rule ? '・くり返し' : ''}${e.source === 'google' ? '・Google' : ''}${e.is_private ? '・自分だけ' : ''}</span></span></button>`;
 
 export function viewCalendar() {
   const { st } = C, { y, m, sel } = st.cal;
@@ -119,10 +120,12 @@ function evSheetHtml() {
   if (!e) return '';
   const cm = s.comments;
   return sheetWrap(esc(e.title), `
-    <p class="muted" style="margin:0">${md(s.day || e.date)} ${e.time ? e.time.slice(0, 5) : '終日'}・${e.for_user ? esc(C.nameOf(e.for_user)) : 'ふたり'}の予定${e.repeat_rule ? '・' + repText(e.repeat_rule) : ''}${e.is_private ? '・自分だけ' : ''}<br>${esc(C.nameOf(e.created_by))}さんが登録</p>
+    <p class="muted" style="margin:0">${md(s.day || e.date)} ${timeText(e)}・${e.for_user ? esc(C.nameOf(e.for_user)) : 'ふたり'}の予定${e.repeat_rule ? '・' + repText(e.repeat_rule) : ''}<br>${e.source === 'google' ? `Googleカレンダー「${esc(e.calendar_name || '')}」から取り込み。内容はGoogleカレンダーで直してください` : esc(C.nameOf(e.created_by)) + 'さんが登録'}</p>
+    ${e.created_by === st.me.user_id ? `<div class="row" style="border:0;min-height:44px"><span class="main"><span class="name">${e.is_private ? '自分だけに見えています' : 'ふたりに見えています'}</span></span>
+      <button class="pill ${e.is_private ? '' : 'go on'}" data-act="evShare">${e.is_private ? 'ふたりに見せる' : '自分だけにする'}</button></div>` : ''}
     <div class="comments">${cm === null ? '<p class="muted" style="margin:0">コメントを読み込み中…</p>' : cm.length ? cm.map(c => `<div class="cmt"><span class="dot" style="background:${C.colorOf(c.user_id)}"></span><div><b>${esc(C.nameOf(c.user_id))}</b> ${esc(c.body)}</div></div>`).join('') : '<p class="muted" style="margin:0">コメントはまだありません</p>'}</div>
     <form class="addrow" data-form="cmt"><label class="sr" for="cmtBody">コメント</label><input id="cmtBody" type="text" maxlength="300" placeholder="コメントを書く" autocomplete="off"><button class="plus" type="submit" aria-label="送る">↑</button></form>
-    ${s.confirm ? `<button class="btn danger" data-act="evDelYes">本当に削除する${e.repeat_rule ? '(くり返しの予定はすべて消えます)' : ''}</button>` : '<button class="btn danger" data-act="evDel">この予定を削除</button>'}
+    ${e.source === 'google' ? '' : s.confirm ? `<button class="btn danger" data-act="evDelYes">本当に削除する${e.repeat_rule ? '(くり返しの予定はすべて消えます)' : ''}</button>` : '<button class="btn danger" data-act="evDel">この予定を削除</button>'}
     ${closeBtn()}`);
 }
 
@@ -198,6 +201,7 @@ function inboxHtml() {
   if (!ib.length) return '';
   return `<section class="card list"><h2 class="group-title">カード利用の確認待ち(${ib.length})</h2>
     <p class="muted" style="margin:0 0 4px;font-size:13px">押して分類を選ぶと家計簿に入ります。家計簿に入れないもの(仕事・アパートの分など)は「記録しない」を選んでください。自分にだけ見えています。</p>
+    <button class="btn" style="margin:4px 0" data-act="inboxBulk">推測の分類のまま、まとめて記録(${ib.length}件)</button>
     ${ib.map(i => `<button class="row" data-act="inboxOpen" data-id="${i.id}"><span class="main"><span class="name">${esc(i.merchant || '(お店の名前なし)')}</span>
       <span class="sub">${md(inboxDate(i))}・${esc(i.card || 'カード')}・推測:${guessCat(i.merchant)}</span></span><b>${yen(i.amount)}</b></button>`).join('')}</section>`;
 }
@@ -309,6 +313,13 @@ function goalAddHtml() {
     ${field('gaAmt', '金額(円)。引き出すときは先頭に「-」', '<input id="gaAmt" type="text" inputmode="numeric" maxlength="10" placeholder="例：5000">')}
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">記録する</button>${closeBtn('やめる')}</form>`);
 }
+function bulkHtml() {
+  const ib = C.st.inbox || [], total = ib.reduce((a, i) => a + i.amount, 0);
+  return sheetWrap(`${ib.length}件をまとめて記録`, `<form class="stack" data-form="bulk" novalidate>
+    <p class="muted" style="margin:0">それぞれ、一覧の「推測」の分類で家計簿に入ります(合計 ${yen(total)})。違う分類のものや、仕事・アパートの分が混ざっていたら、先にそれだけ1件ずつ直してから使ってください。</p>
+    ${field('bkScope', '共有', '<select id="bkScope"><option value="private">自分だけ(相手には見えません)</option><option value="shared">ふたりの支出(精算の対象)</option></select>')}
+    <button class="btn primary" type="submit">まとめて記録する</button>${closeBtn('やめる')}</form>`);
+}
 function confirmHtml() {
   const s = C.st.sheet;
   return sheetWrap(s.title, `<p class="muted" style="margin:0">${s.note || '削除すると元に戻せません。'}</p>
@@ -326,7 +337,7 @@ function csv() {
 // ---------- シート(下から出る画面) ----------
 export function sheetHtml() {
   const t = C.st.sheet?.type;
-  return ({ evNew: evFormHtml, ev: evSheetHtml, choreNew: choreFormHtml, chore: choreSheetHtml, txNew: txFormHtml, tx: txSheetHtml, goalAdd: goalAddHtml, confirm: confirmHtml }[t] || (() => ''))();
+  return ({ evNew: evFormHtml, ev: evSheetHtml, choreNew: choreFormHtml, chore: choreSheetHtml, txNew: txFormHtml, tx: txSheetHtml, goalAdd: goalAddHtml, confirm: confirmHtml, bulk: bulkHtml }[t] || (() => ''))();
 }
 function openSheet(s) { C.st.sheet = { form: true, ...s }; C.render(); }
 
@@ -369,6 +380,15 @@ export async function onSubmit(f) {
     if (inboxId) { await run(sb().from('card_inbox').update({ status: 'recorded' }).eq('id', inboxId)); await reloadInbox(); }
     if (scope === 'shared') activity(`${me.display_name}さんが家計簿に${category} ${yen(amount)}を記録しました`);
     st.sheet = null; st.kb.month = date.slice(0, 7); st.kb.tab = 'list'; await loadTx(true); C.render(); return true;
+  }
+  if (f === 'bulk') {
+    const ib = st.inbox || [], scope = val('bkScope') || 'private';
+    if (!ib.length) { st.sheet = null; C.render(); return true; }
+    await run(sb().from('transactions').insert(ib.map(i => ({ household_id: h(), date: inboxDate(i), amount: i.amount, shop: i.merchant || null,
+      category: guessCat(i.merchant), paid_by: me.user_id, scope }))));
+    await run(sb().from('card_inbox').update({ status: 'recorded' }).in('id', ib.map(i => i.id)), `${ib.length}件を記録しました`);
+    if (scope === 'shared') activity(`${me.display_name}さんがカード利用${ib.length}件を家計簿に記録しました`);
+    st.sheet = null; await Promise.all([loadTx(true), reloadInbox()]); C.render(); return true;
   }
   if (f === 'fix') {
     const name = val('fxName'), amount = toNum(val('fxAmt')); if (!name || !amount) return err('名前と金額を入れてください');
@@ -415,6 +435,10 @@ export async function onClick(act, el) {
       if (st.sheet?.id === id) { st.sheet.comments = cm; C.render(); } return true;
     }
     case 'evDel': st.sheet.confirm = true; C.render(); return true;
+    case 'evShare': { const e = st.events.find(x => x.id === st.sheet.id); if (!e) return true;
+      await run(sb().from('events').update({ is_private: !e.is_private }).eq('id', e.id), e.is_private ? 'ふたりに見せるようにしました' : '自分だけにしました');
+      if (e.is_private) activity(`${me.display_name}さんが予定「${e.title}」(${md(e.date)})を共有しました`);
+      await reloadEvents(); C.render(); return true; }
     case 'evDelYes': await run(sb().from('events').delete().eq('id', st.sheet.id), '予定を削除しました'); st.sheet = null; await reloadEvents(); C.render(); return true;
     case 'choreNew': openSheet({ type: 'choreNew' }); return true;
     case 'choreOpen': openSheet({ type: 'chore', id }); return true;
@@ -443,6 +467,7 @@ export async function onClick(act, el) {
     case 'csv': csv(); return true;
     case 'inboxOpen': { const i = st.inbox.find(x => x.id === id); if (!i) return true;
       openSheet({ type: 'txNew', inbox: id, amt: i.amount, shop: i.merchant || '', date: inboxDate(i), cat: guessCat(i.merchant), card: i.card }); return true; }
+    case 'inboxBulk': openSheet({ type: 'bulk' }); return true;
     case 'inboxIgnore': await run(sb().from('card_inbox').update({ status: 'ignored' }).eq('id', st.sheet.inbox), '記録しないことにしました');
       st.sheet = null; await reloadInbox(); C.render(); return true;
     case 'cardKey': case 'cardKeyRenew':

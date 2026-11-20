@@ -110,6 +110,7 @@ function subscribe() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: 'household_id=eq.' + h }, () => F.reloadEvents().then(softRender))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'chores', filter: 'household_id=eq.' + h }, () => F.reloadChores().then(softRender))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: 'household_id=eq.' + h }, () => F.loadTx(false).then(softRender))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'card_inbox', filter: 'household_id=eq.' + h }, () => F.reloadInbox().then(softRender))
     .on('broadcast', { event: 'going' }, ({ payload }) => { st.going[payload.user_id] = payload.going; softRender(); })
     .subscribe();
 }
@@ -193,6 +194,7 @@ function viewHome() {
   <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>ふたりの暮らし帳</h1></div>
     <a class="pill" href="#settings" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">設定</a></div>
   ${goingBanner()}
+  ${F.inboxCount() ? `<a class="banner" href="#kakeibo" style="text-decoration:none">カード利用の確認待ちが${F.inboxCount()}件あります。家計簿で記録してください</a>` : ''}
   <section class="card"><h2>買い物リスト</h2>
     ${urgent.length ? urgent.map(i => `<div style="display:flex;gap:10px;align-items:center"><span class="tag">急ぎ</span><span>${esc(i.name)}</span></div>`).join('') : '<p class="muted">急ぎの品物はありません</p>'}
     <a href="#shopping" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">リストを開く（残り${todo.length}件）</a></section>
@@ -264,6 +266,7 @@ function viewSettings() {
     <input type="text" autocomplete="username" value="${esc(st.session?.user?.email || '')}" hidden>
     <div class="field"><label for="newpw">新しいパスワード(8文字以上)</label><input id="newpw" type="password" autocomplete="new-password"></div>
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">パスワードを設定する</button></form>
+  ${F.cardSettingsHtml()}
   <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。ログインは一度すれば残ります。</p></section>
   <button class="btn danger" data-act="logout">ログアウト</button>
   </main>`;
@@ -383,5 +386,5 @@ document.addEventListener('click', async e => {
   if (act === 'close') { st.sheet = null; render(); }
 });
 
-F.setup({ st, sb: () => sb, run, esc, render, toast, nameOf, colorOf });
+F.setup({ st, sb: () => sb, run, esc, render, toast, nameOf, colorOf, url: SUPABASE_URL, key: SUPABASE_ANON_KEY });
 init();

@@ -45,7 +45,12 @@ export async function loadFeatures() {
   st.cal ||= { y: n.getFullYear(), m: n.getMonth(), sel: today() };
   st.kb ||= { month: thisMonth(), tab: 'list' };
   st.choreUndo ||= {};
-  await loadTx(true);
+  await Promise.all([loadTx(true), reloadInbox()]);
+}
+// カード利用の受け箱(本人の分だけ)。まだ表がない(SQL未実行)ときは空のまま動かす
+export async function reloadInbox() {
+  const { data, error } = await sb().from('card_inbox').select('*').eq('status', 'new').order('used_at', { ascending: false });
+  C.st.inbox = error ? [] : data;
 }
 export async function reloadEvents() { C.st.events = await C.run(sb().from('events').select('*').eq('household_id', h()).order('date')); }
 export async function reloadChores() { C.st.chores = await C.run(sb().from('chores').select('*').eq('household_id', h()).order('created_at')); }
@@ -170,6 +175,32 @@ function choreSheetHtml() {
 }
 
 // ---------- 家計簿 ----------
+// お店の名前から分類を推測する。前に同じお店で記録した分類があれば、それを優先する
+const GUESS = [
+  ['家具・家電', ['ニトリ', 'ヨドバシ', 'ビック', 'ケーズ', 'エディオン', 'ヤマダ', 'IKEA', 'イケア', 'ジョーシン']],
+  ['日用品', ['ドラッグ', '薬局', 'マツモトキヨシ', 'スギ', 'ウエルシア', 'ツルハ', 'コスモス', 'ダイソー', 'セリア', 'カインズ', 'コメリ', '無印']],
+  ['外食', ['マクドナルド', 'スターバックス', 'スタバ', 'すき家', '吉野家', '松屋', 'ガスト', 'サイゼリヤ', 'コメダ', 'ドトール', 'くら寿司', 'スシロー', 'はま寿司', 'レストラン', 'カフェ', '食堂', 'ラーメン']],
+  ['交通', ['ENEOS', 'エネオス', '出光', 'apollostation', 'コスモ石油', 'JR', '名鉄', 'タクシー', 'パーキング', '駐車', 'ETC', 'モビリティ']],
+  ['光熱費', ['電力', 'ガス', '水道']],
+  ['通信', ['docomo', 'ドコモ', 'au ', 'KDDI', 'ソフトバンク', 'SoftBank', '楽天モバイル', 'ahamo', 'povo']],
+  ['食費', ['イオン', 'AEON', 'スーパー', 'ドミー', 'アピタ', 'ピアゴ', 'バロー', 'フィール', 'ヤマナカ', '業務スーパー', 'セブン', 'ローソン', 'ファミリーマート', 'ミニストップ', 'コストコ', 'マックスバリュ', 'フレッシュ']],
+];
+export function guessCat(shop) {
+  const s = String(shop || ''), past = (C.st.tx || []).find(t => t.shop && t.shop === s);
+  if (past) return past.category;
+  const hit = GUESS.find(([, ks]) => ks.some(k => s.toLowerCase().includes(k.toLowerCase())));
+  return hit ? hit[0] : 'その他';
+}
+const inboxDate = i => ymd(new Date(i.used_at));
+export const inboxCount = () => (C.st.inbox || []).length;
+function inboxHtml() {
+  const { st, esc } = C, ib = st.inbox || [];
+  if (!ib.length) return '';
+  return `<section class="card list"><h2 class="group-title">カード利用の確認待ち(${ib.length})</h2>
+    <p class="muted" style="margin:0 0 4px;font-size:13px">押して分類を選ぶと家計簿に入ります。家計簿に入れないもの(仕事・アパートの分など)は「記録しない」を選んでください。自分にだけ見えています。</p>
+    ${ib.map(i => `<button class="row" data-act="inboxOpen" data-id="${i.id}"><span class="main"><span class="name">${esc(i.merchant || '(お店の名前なし)')}</span>
+      <span class="sub">${md(inboxDate(i))}・${esc(i.card || 'カード')}・推測:${guessCat(i.merchant)}</span></span><b>${yen(i.amount)}</b></button>`).join('')}</section>`;
+}
 const monthLabel = mo => `${Number(mo.slice(0, 4))}年${Number(mo.slice(5))}月`;
 const shiftMonth = (mo, n) => { const [y, m] = mo.split('-').map(Number); return ymd(new Date(y, m - 1 + n, 1)).slice(0, 7); };
 // 精算:ふたりの支出を人数で割り、払った額との差を出す
@@ -211,7 +242,7 @@ function kbList() {
         : '<button class="btn green" data-act="settle">精算済みにする</button>'}</section>`;
   }
   const days = [...new Set(tx.map(t => t.date))];
-  return `<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
+  return `${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
     ${byCat.map(x => `<div class="bar"><span>${x.c}</span><span>${yen(x.spent)}${x.budget ? ' / ' + yen(x.budget) : ''}</span>
       ${x.budget ? `<i><b style="width:${Math.min(100, x.spent / x.budget * 100)}%;background:${x.spent > x.budget ? 'var(--red)' : 'var(--blue)'}"></b></i>` : ''}</div>`).join('')}
   </section>
@@ -225,16 +256,18 @@ function kbList() {
   <button class="fab" data-act="txNew" aria-label="支出を記録">＋</button>`;
 }
 function txFormHtml() {
-  const { st } = C, s = st.sheet, def = s.cat || '食費';
-  const date = st.kb.month === thisMonth() ? today() : st.kb.month + '-01';
-  return sheetWrap('支出を記録', `<form class="stack" data-form="tx" novalidate>
-    ${field('txAmt', '金額(円)', '<input id="txAmt" type="text" inputmode="numeric" maxlength="9" placeholder="例：1280">')}
+  const { st, esc } = C, s = st.sheet, def = s.cat || '食費';
+  const date = s.date || (st.kb.month === thisMonth() ? today() : st.kb.month + '-01');
+  return sheetWrap(s.inbox ? 'カード利用を家計簿に記録' : '支出を記録', `<form class="stack" data-form="tx" novalidate>
+    ${s.inbox ? `<p class="muted" style="margin:0">${esc(s.card || 'カード')}で払った分です。</p>` : ''}
+    ${field('txAmt', '金額(円)', `<input id="txAmt" type="text" inputmode="numeric" maxlength="9" placeholder="例：1280" value="${s.amt || ''}">`)}
     <fieldset class="chips"><legend>分類</legend>${CATS.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === def ? 'checked' : ''}><span>${c}</span></label>`).join('')}</fieldset>
-    ${field('txShop', 'お店・内容(なくてもよい)', '<input id="txShop" type="text" maxlength="40" placeholder="例：スーパー">')}
+    ${field('txShop', 'お店・内容(なくてもよい)', `<input id="txShop" type="text" maxlength="40" placeholder="例：スーパー" value="${esc(s.shop || '')}">`)}
     <div class="two">${field('txDate', '日付', `<input id="txDate" type="date" value="${date}">`)}${field('txWho', '払った人', `<select id="txWho">${memberOpts(st.me.user_id)}</select>`)}</div>
     ${field('txScope', '共有', '<select id="txScope"><option value="shared">ふたりの支出(精算の対象)</option><option value="private">自分だけ(相手には見えません)</option></select>')}
     <p class="err" id="err" hidden></p>
-    <button class="btn primary" type="submit">記録する</button>${closeBtn('やめる')}</form>`);
+    <button class="btn primary" type="submit">記録する</button>
+    ${s.inbox ? '<button class="btn" type="button" data-act="inboxIgnore">家計簿に記録しない(仕事・アパートの分など)</button>' : ''}${closeBtn('やめる')}</form>`);
 }
 function txSheetHtml() {
   const { st, esc } = C, s = st.sheet, t = (st.tx || []).find(x => x.id === s.id); if (!t) return '';
@@ -331,7 +364,9 @@ export async function onSubmit(f) {
     if (!amount) return err('金額を入れてください');
     if (!date || !category) return err('日付と分類を選んでください');
     const scope = val('txScope'), shop = val('txShop') || null;
+    const inboxId = st.sheet?.inbox;
     await run(sb().from('transactions').insert({ household_id: h(), date, amount, shop, category, paid_by: val('txWho') || me.user_id, scope }), '記録しました');
+    if (inboxId) { await run(sb().from('card_inbox').update({ status: 'recorded' }).eq('id', inboxId)); await reloadInbox(); }
     if (scope === 'shared') activity(`${me.display_name}さんが家計簿に${category} ${yen(amount)}を記録しました`);
     st.sheet = null; st.kb.month = date.slice(0, 7); st.kb.tab = 'list'; await loadTx(true); C.render(); return true;
   }
@@ -406,6 +441,13 @@ export async function onClick(act, el) {
       activity(`${me.display_name}さんが${monthLabel(st.kb.month)}の家計簿を精算済みにしました`); await loadFeatures(); C.render(); return true;
     case 'unsettle': await run(sb().from('settlements').delete().eq('household_id', h()).eq('month', st.kb.month), '取り消しました'); await loadFeatures(); C.render(); return true;
     case 'csv': csv(); return true;
+    case 'inboxOpen': { const i = st.inbox.find(x => x.id === id); if (!i) return true;
+      openSheet({ type: 'txNew', inbox: id, amt: i.amount, shop: i.merchant || '', date: inboxDate(i), cat: guessCat(i.merchant), card: i.card }); return true; }
+    case 'inboxIgnore': await run(sb().from('card_inbox').update({ status: 'ignored' }).eq('id', st.sheet.inbox), '記録しないことにしました');
+      st.sheet = null; await reloadInbox(); C.render(); return true;
+    case 'cardKey': case 'cardKeyRenew':
+      st.cardKey = await run(sb().rpc('card_token', { p_renew: act === 'cardKeyRenew' }), act === 'cardKeyRenew' ? '鍵を作り直しました。ショートカットの鍵も入れ替えてください' : null); C.render(); return true;
+    case 'copy': try { await navigator.clipboard.writeText(el.dataset.v); toast('コピーしました'); } catch { toast('コピーできませんでした。長押しで選んでください'); } return true;
     case 'fixToggle': { const f = st.fixed.find(x => x.id === id); await run(sb().from('fixed_costs').update({ active: !f.active }).eq('id', id)); await loadFeatures(); C.render(); return true; }
     case 'fixDel': { const f = st.fixed.find(x => x.id === id);
       openSheet({ type: 'confirm', id, yes: 'fixDelYes', title: `固定費「${C.esc(f.name)}」を削除しますか?`, note: 'これまでに記録した分は家計簿に残ります。削除すると元に戻せません。' }); return true; }
@@ -416,4 +458,16 @@ export async function onClick(act, el) {
     case 'goalDelYes': await run(sb().from('goals').delete().eq('id', id), '削除しました'); st.sheet = null; await loadFeatures(); C.render(); return true;
   }
   return false;
+}
+
+// ---------- 設定:カード利用の取り込み(iPhoneのショートカット) ----------
+export function cardSettingsHtml() {
+  const { st, esc } = C, k = st.cardKey, url = C.url + '/rest/v1/rpc/card_inbox_add';
+  const box = (label, v) => `<div class="field"><span class="muted" style="font-size:13px">${label}</span><div class="codebox">${esc(v)}</div>
+    <button class="btn text" style="padding:0;min-height:40px" data-act="copy" data-v="${esc(v)}">コピー</button></div>`;
+  return `<section class="card stack"><h2>カード利用の取り込み</h2>
+    <p class="muted" style="margin:0;font-size:13px">iPhoneのショートカットで、ウォレットで払ったときにお店と金額をこのアプリへ送ります。下の3つをショートカットに貼り付けます。鍵は人に見せないでください。</p>
+    ${k ? box('① 送り先のURL', url) + box('② apikey(公開用の鍵)', C.key) + box('③ あなたの取り込み用の鍵(p_token)', k)
+        + '<button class="btn" data-act="cardKeyRenew">鍵を作り直す(古い鍵は使えなくなります)</button>'
+        : '<button class="btn primary" data-act="cardKey">設定に使う情報を表示する</button>'}</section>`;
 }

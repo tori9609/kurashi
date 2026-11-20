@@ -22,7 +22,7 @@ const ICON = {
   cart: '<path d="M3 4h3l2 11h11l2-8H7"/><circle cx="10" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/>',
   check: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
 };
-const TABS = [['home','ホーム','home'],['calendar','予定','cal'],['kakeibo','家計簿','yen'],['shopping','買い物','cart'],['chores','家事','check']];
+const TABS = [['home','ホーム','home'],['calendar','予定','cal'],['kakeibo','家計簿','yen'],['shopping','買い物','cart'],['chores','やること','check']];
 
 const st = { session: null, me: null, members: [], items: [], names: [], acts: [], going: {}, urgent: false, sheet: null, channel: null };
 let sb = null;
@@ -37,13 +37,73 @@ function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 2200);
 }
+// ---------- 圏外 ----------
+// 最後に読んだ内容を端末に残し、圏外でも見られるようにする。買い物・やることのチェックや追加は、つながったら送る。
+const SNAP = 'kurashi.snap', OUTBOX = 'kurashi.outbox';
+const isNet = e => (typeof navigator !== 'undefined' && navigator.onLine === false) || /failed to fetch|networkerror|network request failed|load failed|fetch failed/i.test(String(e?.message || e || ''));
+const SNAP_KEYS = ['me', 'members', 'items', 'names', 'acts', 'events', 'chores', 'fixed', 'budgets', 'goals', 'settles', 'tx', 'inbox', 'kb'];
+function saveSnap() {
+  if (!st.me || st.offline) return;
+  clearTimeout(saveSnap.t);
+  saveSnap.t = setTimeout(() => { try { localStorage.setItem(SNAP, JSON.stringify({ at: Date.now(), ...Object.fromEntries(SNAP_KEYS.map(k => [k, st[k]])) })); } catch { /* 容量いっぱいなどは無視 */ } }, 400);
+}
+function loadSnap(uid) {
+  try { const s = JSON.parse(localStorage.getItem(SNAP) || 'null'); if (!s?.me || (uid && s.me.user_id !== uid)) return false; Object.assign(st, s, { snapAt: s.at }); return true; }
+  catch { return false; }
+}
+const outbox = () => { try { return JSON.parse(localStorage.getItem(OUTBOX) || '[]'); } catch { return []; } };
+const setOutbox = b => { try { if (b.length) localStorage.setItem(OUTBOX, JSON.stringify(b)); else localStorage.removeItem(OUTBOX); } catch { /* 無視 */ } };
+function query(x) {
+  let b = sb.from(x.table);
+  b = x.op === 'insert' ? b.insert(x.values) : x.op === 'update' ? b.update(x.values) : b.delete();
+  if (x.op !== 'insert') for (const [k, v] of Object.entries(x.match || {})) b = b.eq(k, v);
+  return b;
+}
+// 書き込み:つながっていればすぐ送る。圏外なら端末にためて、つながったら送る
+async function send(table, op, values, match) {
+  const x = { table, op, values, match };
+  if (!st.offline) {
+    const { error } = await query(x);
+    if (!error) return true;
+    if (!isNet(error)) { toast(error.message || 'うまくいきませんでした'); throw error; }
+    st.offline = true; st.snapAt ||= Date.now();
+  }
+  setOutbox([...outbox(), x]);
+  toast('圏外のため、つながったら送ります');
+  try { localStorage.setItem(SNAP, JSON.stringify({ at: st.snapAt || Date.now(), ...Object.fromEntries(SNAP_KEYS.map(k => [k, st[k]])) })); } catch { /* 無視 */ }
+  render();
+  return false;
+}
+// ためておいた分を順に送る。圏外に戻ったら、そこで止めて残す
+async function flushOutbox() {
+  const box = outbox(); if (!box.length) return 0;
+  let sent = 0;
+  for (let i = 0; i < box.length; i++) {
+    const { error } = await query(box[i]);
+    if (error && isNet(error)) { setOutbox(box.slice(i)); return sent; }
+    sent++;   // ほかの失敗(消された品物のチェックなど)は、送れないので捨てる
+  }
+  setOutbox([]);
+  if (sent) toast(`圏外のあいだの${sent}件を送りました`);
+  return sent;
+}
+function goOffline() {
+  st.offline = true; F.initState(); render();
+}
+window.addEventListener('online', async () => {
+  if (!st.me || !st.offline) return;
+  try { await flushOutbox(); await loadAll(); st.offline = false; st.snapAt = null; subscribe(); render(); } catch { /* まだ不安定ならそのまま */ }
+});
+
 async function run(promise, okMsg) {
   const { data, error } = await promise;
+  if (error && isNet(error)) { toast('圏外のため、いまは保存・読み込みができません。つながってから、もう一度お試しください'); throw error; }
   if (error) { toast(error.message || 'うまくいきませんでした'); throw error; }
   if (okMsg) toast(okMsg);
   return data;
 }
-const aisleOf = n => { const i = AISLES.findIndex(a => a[1].some(k => n.includes(k))); return i < 0 ? AISLES.length : i; };
+// 売り場:名前に含まれる言葉のうち、いちばん長く当てはまるもので決める(「牛乳」は「牛」より「牛乳」を優先)
+const aisleOf = n => { let best = AISLES.length, len = 0; AISLES.forEach((a, i) => a[1].forEach(k => { if (n.includes(k) && k.length > len) { best = i; len = k.length; } })); return best; };
 function parseItem(raw) {
   const t = raw.trim().replace(/\s+/g, ' ');
   const m = t.match(/^(.+?)[\s×xX]+(\d{1,2})$/);
@@ -61,19 +121,27 @@ async function init() {
     const was = st.session?.user?.id; st.session = session; if (was !== session?.user?.id) boot();
   });
   const { data } = await sb.auth.getSession(); st.session = data.session; boot();
-  window.addEventListener('hashchange', () => { st.sheet = st.nextSheet || null; st.nextSheet = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => { st.sheet = st.nextSheet || null; st.nextSheet = null; if (route() === 'trash') st.trash = null; render(); window.scrollTo(0, 0); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 async function boot() {
-  if (!st.session) return renderLogin();
+  if (!st.session) { if (navigator.onLine === false && loadSnap()) return goOffline(); return renderLogin(); }
   const uid = st.session.user.id;
-  const mine = await run(sb.from('members').select('*').eq('user_id', uid).maybeSingle());
-  if (!mine) return renderOnboard();
-  st.me = mine;
-  await loadAll();
-  subscribe();
-  render();
+  try {
+    const { data: mine, error } = await sb.from('members').select('*').eq('user_id', uid).maybeSingle();
+    if (error) throw error;
+    if (!mine) return renderOnboard();
+    st.me = mine;
+    await flushOutbox();
+    await loadAll();
+    st.offline = false; st.snapAt = null;
+    subscribe();
+    render();
+  } catch (e) {
+    if (isNet(e) && loadSnap(uid)) return goOffline();
+    toast('読み込めませんでした。通信を確かめて、開き直してください');
+  }
 }
 
 async function loadAll() {
@@ -81,10 +149,10 @@ async function loadAll() {
   const [m, i, n, a] = await Promise.all([
     run(sb.from('members').select('*').eq('household_id', h).order('joined_at')),
     run(sb.from('shopping_items').select('*').eq('household_id', h).order('created_at')),
-    run(sb.from('item_names').select('name,last_used').eq('household_id', h).order('last_used', { ascending: false }).limit(40)),
+    run(sb.from('item_names').select('*').eq('household_id', h).order('last_used', { ascending: false }).limit(300)),
     run(sb.from('activities').select('*').eq('household_id', h).order('created_at', { ascending: false }).limit(20)),
   ]);
-  st.members = m; st.items = i; st.names = n.map(x => x.name); st.acts = a;
+  st.members = m; st.items = i; st.names = n; st.acts = a;
   await F.loadFeatures();
 }
 
@@ -125,8 +193,8 @@ function renderSetup() {
 // メールのリンクはSafariで開くため、アプリ側では「メールアドレス+パスワード」でログインする。
 function renderLogin(sent) {
   $app.innerHTML = `<main class="screen plain" style="padding-top:14vh">
-  <h1 style="font-size:30px;color:var(--blue)">ふたりの暮らし帳</h1>
-  <p class="muted">予定・家計簿・買い物・家事をふたりで共有</p>
+  <h1 style="font-size:30px;color:var(--accent-text)">ふたりの暮らし帳</h1>
+  <p class="muted">予定・家計簿・買い物・やることをふたりで共有</p>
   ${sent ? `<div class="card"><h2>メールを送りました</h2><p class="muted">${esc(sent)}</p>
      <button class="btn text" data-act="relogin">ログイン画面に戻る</button></div>` : `
   <form class="card stack" data-form="login" novalidate>
@@ -176,9 +244,12 @@ function renderOnboard() {
 function render() {
   if (!st.me) return;
   const r = route();
-  const body = { home: viewHome, shopping: viewShopping, settings: viewSettings, calendar: F.viewCalendar, chores: F.viewChores, kakeibo: F.viewKakeibo }[r] || viewHome;
+  const body = { home: viewHome, shopping: viewShopping, settings: viewSettings, trash: F.viewTrash, search: F.viewSearch, calendar: F.viewCalendar, chores: F.viewChores, kakeibo: F.viewKakeibo }[r] || viewHome;
   st.dirty = false;
-  $app.innerHTML = body() + tabbar(r) + sheet();
+  F.applyTheme();
+  const off = st.offline ? `<div class="offline" role="status">📵 圏外です。${st.snapAt ? new Date(st.snapAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '時点の' : '端末に残っている'}内容を表示しています。${outbox().length ? `送っていない変更 ${outbox().length}件は、つながったら送ります。` : '買い物とやることのチェックは、圏外でもできます。'}</div>` : '';
+  $app.innerHTML = off + body() + tabbar(r) + sheet();
+  saveSnap();
   const inp = document.getElementById('add'); if (inp && st.keepFocus) { inp.focus(); st.keepFocus = false; }
 }
 
@@ -192,7 +263,7 @@ function viewHome() {
   const d = new Date(), w = '日月火水木金土'[d.getDay()], evs = F.eventsOn(F.ymd(d)), chs = F.choresToday();
   return `<main class="screen">
   <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>ふたりの暮らし帳</h1></div>
-    <a class="pill" href="#settings" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">設定</a></div>
+    <div class="nav"><a class="pill" href="#search" aria-label="検索" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">🔍</a><a class="pill" href="#settings" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">設定</a></div></div>
   ${goingBanner()}
   ${F.inboxCount() ? `<a class="banner" href="#kakeibo" style="text-decoration:none">カード利用の確認待ちが${F.inboxCount()}件あります。家計簿で記録してください</a>` : ''}
   <section class="card"><h2>買い物リスト</h2>
@@ -204,9 +275,9 @@ function viewHome() {
   <section class="card list"><h2 class="group-title">今日の予定</h2>
     ${evs.length ? evs.slice(0, 5).map(F.evRow).join('') : '<p class="muted" style="margin:0">今日の予定はありません</p>'}
     <a href="#calendar" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">カレンダーを開く</a></section>
-  <section class="card list"><h2 class="group-title">今日の家事</h2>
-    ${chs.length ? chs.map(F.choreRow).join('') : '<p class="muted" style="margin:0">今日の家事はありません</p>'}
-    <a href="#chores" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">家事を開く</a></section>
+  <section class="card list"><h2 class="group-title">今日やること</h2>
+    ${chs.length ? chs.map(F.choreRow).join('') : '<p class="muted" style="margin:0">今日やることはありません</p>'}
+    <a href="#chores" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">やることを開く</a></section>
   <section class="card"><h2>今月のふたりの支出</h2>
     ${F.isThisMonth() ? `<p style="margin:0;font-size:26px;font-weight:700">¥${F.sharedTotal().toLocaleString('ja-JP')}</p>` : ''}
     <a href="#kakeibo" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">家計簿を開く</a></section>
@@ -229,8 +300,8 @@ function viewShopping() {
     <button class="pill go ${going ? 'on' : ''}" data-act="going" aria-pressed="${going}">${going ? '買い物おわり' : '買い物に行く'}</button></div>
   ${goingBanner()}
   ${groups.map(({ g, items }) => `<section class="card list"><h2 class="group-title">${g}</h2>
-    ${items.map(i => `<button class="row" data-act="toggle" data-id="${i.id}" aria-pressed="false">
-      <span class="box"></span><span class="main"><span class="name">${esc(i.name)}${i.qty > 1 ? ' ×' + i.qty : ''}</span><span class="sub">${esc(nameOf(i.added_by))}が追加</span></span>
+    ${items.map(i => `<button class="row" data-act="toggle" data-id="${i.id}" aria-pressed="false" style="--c:${colorOf(i.added_by)}">
+      <span class="box"></span><span class="main"><span class="name">${esc(i.name)}${i.qty > 1 ? ' ×' + i.qty : ''}</span><span class="sub">${F.who(i.added_by)}が追加</span></span>
       ${i.urgent ? '<span class="tag">急ぎ</span>' : ''}</button>`).join('')}</section>`).join('')}
   ${!todo.length ? '<p class="muted" style="text-align:center">買うものはありません</p>' : ''}
   ${done.length ? `<section class="card list"><h2 class="group-title">カゴに入れた（${done.length}）</h2>
@@ -248,11 +319,42 @@ function viewShopping() {
 }
 
 // 入力候補（日本語入力を邪魔しないよう、候補の部分だけを書きかえる）
+// 並び:★固定 → よく買う順(回数・最近) → 最初から入っている品物。入力中は、名前に入力した文字を含むものだけ(ひらがな・カタカナは同じとみなす)
+const kana = s => String(s).toLowerCase().replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s/g, '');
+function candidates() {
+  const rows = st.names, known = new Set(rows.map(r => r.name));
+  const live = rows.filter(r => !r.hidden);
+  const pin = live.filter(r => r.pinned).sort((a, b) => b.uses - a.uses);
+  const rest = live.filter(r => !r.pinned).sort((a, b) => b.uses - a.uses || String(b.last_used).localeCompare(String(a.last_used)));
+  return [...pin.map(r => ({ name: r.name, pinned: true, uses: r.uses })), ...rest.map(r => ({ name: r.name, pinned: false, uses: r.uses })),
+    ...DEFAULT_NAMES.filter(n => !known.has(n)).map(n => ({ name: n, pinned: false, uses: 0, preset: true }))];
+}
 function suggHtml() {
   const inList = new Set(st.items.filter(i => !i.done).map(i => i.name));
-  const q = parseItem(st.draft || '').name;
-  return [...new Set([...st.names, ...DEFAULT_NAMES])].filter(n => !inList.has(n) && (!q || n.includes(q))).slice(0, 10)
-    .map(n => `<button type="button" data-act="quick" data-name="${esc(n)}">＋ ${esc(n)}</button>`).join('');
+  const q = kana(parseItem(st.draft || '').name);
+  let list = candidates().filter(c => !inList.has(c.name));
+  if (q) list = list.filter(c => kana(c.name).includes(q)).sort((a, b) => kana(b.name).startsWith(q) - kana(a.name).startsWith(q));
+  return list.slice(0, q ? 10 : 12).map(c => `<button type="button" data-act="quick" data-name="${esc(c.name)}"${c.pinned ? ' class="pin"' : ''}>${c.pinned ? '★' : '＋'} ${esc(c.name)}</button>`).join('')
+    + (q ? '' : '<button type="button" class="edit" data-act="suggEdit">✎ ボタンを編集</button>');
+}
+function suggSheet() {
+  const all = candidates(), hidden = st.names.filter(r => r.hidden);
+  const row = c => `<div class="row"><span class="main"><span class="name">${esc(c.name)}</span><span class="sub">${c.preset ? '最初から入っている品物' : `これまで${c.uses}回`}</span></span>
+    <button class="pill${c.pinned ? ' on' : ''}" data-act="pin" data-name="${esc(c.name)}" aria-pressed="${c.pinned}" aria-label="${esc(c.name)}をいつもボタンに出す">${c.pinned ? '★ 固定中' : '☆ 固定'}</button>
+    <button class="pill" data-act="hideName" data-name="${esc(c.name)}" aria-label="${esc(c.name)}を候補から外す">外す</button></div>`;
+  return `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-label="ボタンを編集" data-stop>
+    <h2>買い物のボタンを編集</h2>
+    <p class="muted" style="margin:0">★を付けた品物は、いつも先頭にボタンで出ます。ほかは、よく買う順に並びます。入力中は、入れた文字を含む品物だけが出ます。</p>
+    <form class="addrow" data-form="pinAdd"><label class="sr" for="pinName">ボタンにする品物</label><input id="pinName" type="text" maxlength="60" placeholder="ボタンにしたい品物(例：ヨーグルト)" autocomplete="off"><button type="submit" class="plus" aria-label="ボタンに追加">＋</button></form>
+    <div class="list">${all.map(row).join('')}</div>
+    ${hidden.length ? `<h3 class="sub-title">候補から外したもの</h3><div class="list">${hidden.map(r => `<div class="row"><span class="main"><span class="name">${esc(r.name)}</span></span><button class="pill" data-act="unhideName" data-name="${esc(r.name)}">戻す</button></div>`).join('')}</div>` : ''}
+    <button class="btn" data-act="close">閉じる</button></div></div>`;
+}
+// 候補の行を保存(なければ作る)
+async function saveName(name, patch) {
+  const h = st.me.household_id, r = st.names.find(x => x.name === name);
+  if (r) { Object.assign(r, patch); await run(sb.from('item_names').update(patch).eq('household_id', h).eq('name', name)); }
+  else { const row = { household_id: h, name, uses: 0, last_used: new Date().toISOString(), pinned: false, hidden: false, ...patch }; st.names.unshift(row); await run(sb.from('item_names').insert(row)); }
 }
 
 function viewSettings() {
@@ -266,8 +368,9 @@ function viewSettings() {
     <input type="text" autocomplete="username" value="${esc(st.session?.user?.email || '')}" hidden>
     <div class="field"><label for="newpw">新しいパスワード(8文字以上)</label><input id="newpw" type="password" autocomplete="new-password"></div>
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">パスワードを設定する</button></form>
-  ${F.cardSettingsHtml()}
+  ${F.appearanceSettingsHtml()}${F.notifySettingsHtml()}${F.calSettingsHtml()}${F.widgetSettingsHtml()}${F.backupSettingsHtml()}${F.cardSettingsHtml()}
   <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。ログインは一度すれば残ります。</p></section>
+  <a class="btn" href="#trash" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">🗑 ゴミ箱(消したものを7日間は戻せます)</a>
   <button class="btn danger" data-act="logout">ログアウト</button>
   </main>`;
 }
@@ -289,6 +392,7 @@ function sheet() {
       <p class="muted">消した品物は、入力候補には残ります。</p>
       <button class="btn primary" data-act="clear">消す</button><button class="btn" data-act="close">やめる</button></div></div>`;
   }
+  if (st.sheet.type === 'sugg') return suggSheet();
   return F.sheetHtml();
 }
 
@@ -298,10 +402,13 @@ async function addItem(raw) {
   if (!name) return;
   const h = st.me.household_id;
   st.draft = ''; st.keepFocus = true;
-  await run(sb.from('shopping_items').insert({ household_id: h, name, qty, urgent: st.urgent }));
-  st.urgent = false; await reloadItems();
-  sb.from('item_names').upsert({ household_id: h, name, last_used: new Date().toISOString() }).then(() => {});
-  if (!st.names.includes(name)) st.names.unshift(name);
+  const row = { id: crypto.randomUUID(), household_id: h, name, qty, urgent: st.urgent, added_by: st.me.user_id };
+  st.items.push({ ...row, done: false, done_by: null, created_at: new Date().toISOString() }); st.urgent = false; render();   // 先に画面に出す
+  if (!await send('shopping_items', 'insert', row)) return;   // 圏外ならここまで(候補の回数やお知らせは送らない)
+  await reloadItems();
+  const nr = st.names.find(x => x.name === name), uses = (nr?.uses || 0) + 1, last_used = new Date().toISOString();
+  sb.from('item_names').upsert({ household_id: h, name, uses, last_used, hidden: false }).then(() => {});
+  if (nr) Object.assign(nr, { uses, last_used, hidden: false }); else st.names.unshift({ name, uses, last_used, pinned: false, hidden: false });
   sb.from('activities').insert({ household_id: h, message: `${st.me.display_name}さんが「${name}」を買い物リストに追加しました` }).then(() => {});
 }
 
@@ -328,6 +435,8 @@ document.addEventListener('submit', async e => {
     } catch (x) { err.textContent = x.message; err.hidden = false; }
   }
   if (f === 'add') await addItem(document.getElementById('add').value);
+  if (f === 'pinAdd') { const name = parseItem(document.getElementById('pinName').value).name; if (!name) return;
+    await saveName(name, { pinned: true, hidden: false }); toast(`「${name}」をボタンに固定しました`); render(); }
   if (st.me) await F.onSubmit(f);
 });
 
@@ -342,7 +451,7 @@ document.addEventListener('click', async e => {
   if (el.dataset.act === 'close' && e.target.closest('[data-stop]') && !e.target.closest('button[data-act="close"]')) return;
   const h = st.me?.household_id, act = el.dataset.act;
   if (st.me && await F.onClick(act, el)) return;
-  if (act === 'logout') { await sb.auth.signOut(); st.me = null; return; }
+  if (act === 'logout') { try { localStorage.removeItem(SNAP); localStorage.removeItem(OUTBOX); } catch { /* 無視 */ } await sb.auth.signOut(); st.me = null; return; }
   if (act === 'relogin') return renderLogin();
   const back = location.origin + location.pathname;
   if (act === 'signup') {
@@ -366,9 +475,13 @@ document.addEventListener('click', async e => {
   if (act === 'toggle') {
     const it = st.items.find(i => i.id === el.dataset.id); if (!it) return;
     it.done = !it.done; it.done_by = it.done ? st.me.user_id : null; render();   // 先に画面を変えて、あとで保存
-    await run(sb.from('shopping_items').update({ done: it.done, done_by: it.done_by }).eq('id', it.id));
+    await send('shopping_items', 'update', { done: it.done, done_by: it.done_by }, { id: it.id });
   }
   if (act === 'quick') await addItem(el.dataset.name);
+  if (act === 'suggEdit') { st.sheet = { type: 'sugg' }; render(); }
+  if (act === 'pin') { const c = candidates().find(x => x.name === el.dataset.name); await saveName(el.dataset.name, { pinned: !c?.pinned, hidden: false }); render(); }
+  if (act === 'hideName') { await saveName(el.dataset.name, { hidden: true, pinned: false }); toast('候補から外しました(下の「候補から外したもの」で戻せます)'); render(); }
+  if (act === 'unhideName') { await saveName(el.dataset.name, { hidden: false }); render(); }
   if (act === 'urgent') { st.urgent = !st.urgent; render(); }
   if (act === 'going') {
     const g = !st.going[st.me.user_id]; st.going[st.me.user_id] = g; render();
@@ -376,7 +489,8 @@ document.addEventListener('click', async e => {
     sb.from('activities').insert({ household_id: h, message: `${st.me.display_name}さんが${g ? '買い物に行きます' : '買い物を終えました'}` }).then(() => {});
   }
   if (act === 'askClear') { st.sheet = { type: 'clear' }; render(); }
-  if (act === 'clear') { st.sheet = null; await run(sb.from('shopping_items').delete().eq('household_id', h).eq('done', true), 'リストから消しました'); await reloadItems(); }
+  if (act === 'clear') { st.sheet = null; st.items = st.items.filter(i => !i.done); render();
+    if (await send('shopping_items', 'delete', null, { household_id: h, done: true })) { toast('リストから消しました'); await reloadItems(); } }
   if (act === 'invite') { const code = await run(sb.rpc('renew_invite', { h })); st.sheet = { type: 'invite', code }; render(); }
   if (act === 'share') {
     const link = el.dataset.link;
@@ -386,5 +500,5 @@ document.addEventListener('click', async e => {
   if (act === 'close') { st.sheet = null; render(); }
 });
 
-F.setup({ st, sb: () => sb, run, esc, render, toast, nameOf, colorOf, url: SUPABASE_URL, key: SUPABASE_ANON_KEY });
+F.setup({ st, sb: () => sb, run, send, esc, render, toast, nameOf, colorOf, url: SUPABASE_URL, key: SUPABASE_ANON_KEY });
 init();

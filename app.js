@@ -1,7 +1,8 @@
-// ふたりの暮らし帳 第1段階：ログイン・招待・買い物リスト
+// ふたりの暮らし帳：ログイン・招待・買い物リスト(第1段階)。予定・家事・家計簿は features.js(第2・第3段階)
 // 仕組み：Supabase（データ保存とログイン）に、この画面からつなぐ。
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import * as F from './features.js';
 
 const $app = document.getElementById('app');
 const COLORS = { shared: '#1F8A5B' };
@@ -55,9 +56,12 @@ async function init() {
   if (pending) localStorage.setItem('kurashi.join', pending.toUpperCase());
   if (!SUPABASE_URL || SUPABASE_URL.includes('ここに')) return renderSetup();
   sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  sb.auth.onAuthStateChange((_e, session) => { const was = st.session?.user?.id; st.session = session; if (was !== session?.user?.id) boot(); });
+  sb.auth.onAuthStateChange((ev, session) => {
+    if (ev === 'PASSWORD_RECOVERY') { st.recovery = true; location.hash = '#settings'; }
+    const was = st.session?.user?.id; st.session = session; if (was !== session?.user?.id) boot();
+  });
   const { data } = await sb.auth.getSession(); st.session = data.session; boot();
-  window.addEventListener('hashchange', () => { st.sheet = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => { st.sheet = st.nextSheet || null; st.nextSheet = null; render(); window.scrollTo(0, 0); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
@@ -81,10 +85,18 @@ async function loadAll() {
     run(sb.from('activities').select('*').eq('household_id', h).order('created_at', { ascending: false }).limit(20)),
   ]);
   st.members = m; st.items = i; st.names = n.map(x => x.name); st.acts = a;
+  await F.loadFeatures();
 }
 
 async function reloadItems() {
   st.items = await run(sb.from('shopping_items').select('*').eq('household_id', st.me.household_id).order('created_at'));
+  softRender();
+}
+
+// 入力中(シートや設定・家計簿の入力欄)は、相手の変更で画面を描き直さない(入力が消えないように)
+function softRender() {
+  const typing = document.activeElement?.matches?.('form[data-form] input:not(#add), form[data-form] select');
+  if (st.sheet?.form || typing) { st.dirty = true; return; }
   render();
 }
 
@@ -94,8 +106,11 @@ function subscribe() {
   st.channel = sb.channel('hh-' + h)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: 'household_id=eq.' + h }, reloadItems)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activities', filter: 'household_id=eq.' + h }, ({ new: a }) => {
-      st.acts = [a, ...st.acts].slice(0, 20); if (a.user_id !== st.me.user_id) toast(a.message); render(); })
-    .on('broadcast', { event: 'going' }, ({ payload }) => { st.going[payload.user_id] = payload.going; render(); })
+      st.acts = [a, ...st.acts].slice(0, 20); if (a.user_id !== st.me.user_id) toast(a.message); softRender(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: 'household_id=eq.' + h }, () => F.reloadEvents().then(softRender))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chores', filter: 'household_id=eq.' + h }, () => F.reloadChores().then(softRender))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: 'household_id=eq.' + h }, () => F.loadTx(false).then(softRender))
+    .on('broadcast', { event: 'going' }, ({ payload }) => { st.going[payload.user_id] = payload.going; softRender(); })
     .subscribe();
 }
 
@@ -105,18 +120,41 @@ function renderSetup() {
   <div class="card"><p class="muted">config.js に Supabase の「Project URL」と「Publishable key」を貼ってください。手順は README.md にあります。</p></div></main>`;
 }
 
+// ホーム画面に追加したアプリは、Safariとログイン情報が別になる。
+// メールのリンクはSafariで開くため、アプリ側では「メールアドレス+パスワード」でログインする。
 function renderLogin(sent) {
-  $app.innerHTML = `<main class="screen plain" style="padding-top:18vh">
+  $app.innerHTML = `<main class="screen plain" style="padding-top:14vh">
   <h1 style="font-size:30px;color:var(--blue)">ふたりの暮らし帳</h1>
   <p class="muted">予定・家計簿・買い物・家事をふたりで共有</p>
-  ${sent ? `<div class="card"><h2>メールを送りました</h2><p class="muted">${esc(sent)} に届いたリンクを、このiPhoneで開いてください。</p>
-     <button class="btn text" data-act="relogin">メールアドレスを変える</button></div>` : `
-  <form class="card" data-form="login" novalidate>
-    <div class="field"><label for="mail">メールアドレス</label><input id="mail" type="email" autocomplete="email" required placeholder="name@example.com"></div>
-    <p class="err" id="err" hidden>メールアドレスを正しく入れてください</p>
-    <button class="btn primary" type="submit">ログイン用のリンクを送る</button>
-    <p class="muted" style="font-size:13px">パスワードは使いません。届いたメールのリンクを押すとログインできます。</p>
-  </form>`}</main>`;
+  ${sent ? `<div class="card"><h2>メールを送りました</h2><p class="muted">${esc(sent)}</p>
+     <button class="btn text" data-act="relogin">ログイン画面に戻る</button></div>` : `
+  <form class="card stack" data-form="login" novalidate>
+    <div class="field"><label for="mail">メールアドレス</label><input id="mail" type="email" autocomplete="username" required placeholder="name@example.com"></div>
+    <div class="field"><label for="pw">パスワード</label><input id="pw" type="password" autocomplete="current-password" placeholder="8文字以上"></div>
+    <p class="err" id="err" hidden></p>
+    <button class="btn primary" type="submit">ログイン</button>
+    <button class="btn" type="button" data-act="signup">はじめての方:このパスワードで登録</button>
+  </form>
+  <div class="card stack"><p class="muted" style="margin:0;font-size:13px">パスワードをまだ決めていない方・忘れた方</p>
+    <button class="btn text" data-act="magic">メールのリンクでログイン(Safariで開きます)</button>
+    <button class="btn text" data-act="forgot">パスワードを設定し直すメールを送る</button></div>`}</main>`;
+}
+const AUTH_MSG = {
+  'Invalid login credentials': 'メールアドレスかパスワードが違います。パスワードをまだ決めていない場合は、下の「パスワードを設定し直すメールを送る」を使ってください。',
+  'Email not confirmed': '確認メールのリンクをまだ押していません。メールを確かめてください。',
+  'User already registered': 'このメールアドレスは登録済みです。「ログイン」を押すか、パスワードを設定し直してください。',
+};
+function loginInput(needPw) {
+  const mail = document.getElementById('mail').value.trim(), pw = document.getElementById('pw').value, err = document.getElementById('err');
+  const bad = m => { err.textContent = m; err.hidden = false; return null; };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return bad('メールアドレスを正しく入れてください');
+  if (needPw && pw.length < 8) return bad('パスワードは8文字以上にしてください');
+  return { mail, pw };
+}
+async function authCall(promise) {
+  const { data, error } = await promise;
+  if (error) { const e = document.getElementById('err'); if (e) { e.textContent = AUTH_MSG[error.message] || error.message; e.hidden = false; } return null; }
+  return data || {};
 }
 
 function renderOnboard() {
@@ -137,7 +175,8 @@ function renderOnboard() {
 function render() {
   if (!st.me) return;
   const r = route();
-  const body = { home: viewHome, shopping: viewShopping, settings: viewSettings }[r] || (() => viewLater(r));
+  const body = { home: viewHome, shopping: viewShopping, settings: viewSettings, calendar: F.viewCalendar, chores: F.viewChores, kakeibo: F.viewKakeibo }[r] || viewHome;
+  st.dirty = false;
   $app.innerHTML = body() + tabbar(r) + sheet();
   const inp = document.getElementById('add'); if (inp && st.keepFocus) { inp.focus(); st.keepFocus = false; }
 }
@@ -149,7 +188,7 @@ function tabbar(r) {
 
 function viewHome() {
   const todo = st.items.filter(i => !i.done), urgent = todo.filter(i => i.urgent);
-  const d = new Date(), w = '日月火水木金土'[d.getDay()];
+  const d = new Date(), w = '日月火水木金土'[d.getDay()], evs = F.eventsOn(F.ymd(d)), chs = F.choresToday();
   return `<main class="screen">
   <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>ふたりの暮らし帳</h1></div>
     <a class="pill" href="#settings" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">設定</a></div>
@@ -160,7 +199,15 @@ function viewHome() {
   <section class="card"><h2>お知らせ</h2>
     ${st.acts.length ? st.acts.slice(0, 6).map(a => `<div style="display:flex;gap:10px;align-items:flex-start"><span class="dot" style="background:${colorOf(a.user_id)};margin-top:6px"></span>
       <div style="display:flex;flex-direction:column"><span>${esc(a.message)}</span><span class="muted" style="font-size:12px">${new Date(a.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div></div>`).join('') : '<p class="muted">まだお知らせはありません</p>'}</section>
-  <section class="card"><h2>予定・家計簿・家事</h2><p class="muted">第2・第3段階で使えるようになります。</p></section>
+  <section class="card list"><h2 class="group-title">今日の予定</h2>
+    ${evs.length ? evs.slice(0, 5).map(F.evRow).join('') : '<p class="muted" style="margin:0">今日の予定はありません</p>'}
+    <a href="#calendar" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">カレンダーを開く</a></section>
+  <section class="card list"><h2 class="group-title">今日の家事</h2>
+    ${chs.length ? chs.map(F.choreRow).join('') : '<p class="muted" style="margin:0">今日の家事はありません</p>'}
+    <a href="#chores" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">家事を開く</a></section>
+  <section class="card"><h2>今月のふたりの支出</h2>
+    ${F.isThisMonth() ? `<p style="margin:0;font-size:26px;font-weight:700">¥${F.sharedTotal().toLocaleString('ja-JP')}</p>` : ''}
+    <a href="#kakeibo" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">家計簿を開く</a></section>
   </main>`;
 }
 
@@ -188,7 +235,7 @@ function viewShopping() {
     ${done.map(i => `<button class="row done" data-act="toggle" data-id="${i.id}" aria-pressed="true"><span class="box">✓</span>
       <span class="main"><span class="name">${esc(i.name)}</span></span><span class="sub">${esc(nameOf(i.done_by))}</span></button>`).join('')}
     <div style="display:flex;gap:8px;padding:8px 0 10px"><button class="btn" style="flex:1;font-size:15px;white-space:nowrap" data-act="askClear">リストから消す</button>
-      <a class="btn green" style="flex:1.4;display:flex;align-items:center;justify-content:center;text-decoration:none" href="#kakeibo">家計簿に記録する</a></div></section>` : ''}
+      <button class="btn green" style="flex:1.4" data-act="txFromShop">家計簿に記録する</button></div></section>` : ''}
   </main>
   <div class="addbar"><div class="inner">
     <div class="sugg" id="sugg">${suggHtml()}</div>
@@ -212,14 +259,14 @@ function viewSettings() {
   <section class="card list"><h2 class="group-title">メンバー（最大5人）</h2>
     ${st.members.map(m => `<div class="row"><span class="dot" style="background:${m.color}"></span><span class="main"><span class="name">${esc(m.display_name)}${m.user_id === st.me.user_id ? '（自分）' : ''}</span></span><span class="sub">${m.is_admin ? '管理者' : ''}</span></div>`).join('')}
     ${st.me.is_admin && st.members.length < 5 ? '<button class="btn primary" style="margin:8px 0 10px" data-act="invite">メンバーを招待する</button>' : ''}</section>
-  <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。</p></section>
+  <form class="card stack" data-form="pw" novalidate><h2>${st.recovery ? '新しいパスワードを決めてください' : 'パスワード'}</h2>
+    <p class="muted" style="margin:0;font-size:13px">ホーム画面のアプリでは、メールアドレスとこのパスワードでログインします。</p>
+    <input type="text" autocomplete="username" value="${esc(st.session?.user?.email || '')}" hidden>
+    <div class="field"><label for="newpw">新しいパスワード(8文字以上)</label><input id="newpw" type="password" autocomplete="new-password"></div>
+    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">パスワードを設定する</button></form>
+  <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。ログインは一度すれば残ります。</p></section>
   <button class="btn danger" data-act="logout">ログアウト</button>
   </main>`;
-}
-
-function viewLater(r) {
-  const label = { calendar: 'カレンダー（第2段階）', kakeibo: '家計簿（第3段階）', chores: '家事（第2段階）' }[r] || 'このページ';
-  return `<main class="screen"><h1>${label}</h1><section class="card"><p class="muted">この画面はこれから作ります。いまは「ホーム」と「買い物」が使えます。</p></section></main>`;
 }
 
 function sheet() {
@@ -239,7 +286,7 @@ function sheet() {
       <p class="muted">消した品物は、入力候補には残ります。</p>
       <button class="btn primary" data-act="clear">消す</button><button class="btn" data-act="close">やめる</button></div></div>`;
   }
-  return '';
+  return F.sheetHtml();
 }
 
 // ---------- 操作 ----------
@@ -258,10 +305,14 @@ async function addItem(raw) {
 document.addEventListener('submit', async e => {
   const f = e.target.dataset.form; if (!f) return; e.preventDefault();
   if (f === 'login') {
-    const mail = document.getElementById('mail').value.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { document.getElementById('err').hidden = false; return; }
-    await run(sb.auth.signInWithOtp({ email: mail, options: { emailRedirectTo: location.origin + location.pathname } }));
-    renderLogin(mail);
+    const v = loginInput(true); if (!v) return;
+    await authCall(sb.auth.signInWithPassword({ email: v.mail, password: v.pw }));   // うまくいけば onAuthStateChange が画面を切りかえる
+  }
+  if (f === 'pw') {
+    const pw = document.getElementById('newpw').value, err = document.getElementById('err');
+    if (pw.length < 8) { err.textContent = 'パスワードは8文字以上にしてください'; err.hidden = false; return; }
+    await run(sb.auth.updateUser({ password: pw }), 'パスワードを設定しました');
+    st.recovery = false; render();
   }
   if (f === 'onboard') {
     const dn = document.getElementById('dname').value.trim(), code = document.getElementById('code').value.trim();
@@ -274,6 +325,7 @@ document.addEventListener('submit', async e => {
     } catch (x) { err.textContent = x.message; err.hidden = false; }
   }
   if (f === 'add') await addItem(document.getElementById('add').value);
+  if (st.me) await F.onSubmit(f);
 });
 
 document.addEventListener('input', e => {
@@ -286,8 +338,28 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (el.dataset.act === 'close' && e.target.closest('[data-stop]') && !e.target.closest('button[data-act="close"]')) return;
   const h = st.me?.household_id, act = el.dataset.act;
+  if (st.me && await F.onClick(act, el)) return;
   if (act === 'logout') { await sb.auth.signOut(); st.me = null; return; }
   if (act === 'relogin') return renderLogin();
+  const back = location.origin + location.pathname;
+  if (act === 'signup') {
+    const v = loginInput(true); if (!v) return;
+    const d = await authCall(sb.auth.signUp({ email: v.mail, password: v.pw, options: { emailRedirectTo: back } })); if (!d) return;
+    if (!d.session) renderLogin(`${v.mail} に確認メールを送りました。メールの「Confirm email address」を押したあと、このアプリに戻って「ログイン」してください。`);
+    return;
+  }
+  if (act === 'magic') {
+    const v = loginInput(false); if (!v) return;
+    if (await authCall(sb.auth.signInWithOtp({ email: v.mail, options: { emailRedirectTo: back } })))
+      renderLogin(`${v.mail} に届いたリンクを押すと、Safariでログインできます。ホーム画面のアプリでも使うには、Safariで「設定」→「パスワード」を決めてから、アプリで「ログイン」してください。`);
+    return;
+  }
+  if (act === 'forgot') {
+    const v = loginInput(false); if (!v) return;
+    if (await authCall(sb.auth.resetPasswordForEmail(v.mail, { redirectTo: back })))
+      renderLogin(`${v.mail} にメールを送りました。リンクを押すとSafariで開くので、表示された画面で新しいパスワードを決めてください。そのあと、このアプリに戻って「ログイン」してください。`);
+    return;
+  }
   if (act === 'toggle') {
     const it = st.items.find(i => i.id === el.dataset.id); if (!it) return;
     it.done = !it.done; it.done_by = it.done ? st.me.user_id : null; render();   // 先に画面を変えて、あとで保存
@@ -311,4 +383,5 @@ document.addEventListener('click', async e => {
   if (act === 'close') { st.sheet = null; render(); }
 });
 
+F.setup({ st, sb: () => sb, run, esc, render, toast, nameOf, colorOf });
 init();

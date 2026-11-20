@@ -107,7 +107,7 @@ create table if not exists transactions (
   date date not null default current_date,
   amount int not null check (amount > 0 and amount < 100000000),
   shop text,
-  category text not null check (category in ('住居','食費','外食','日用品','光熱費','通信','交通','趣味','その他')),
+  category text not null check (category in ('住居','食費','外食','日用品','家具・家電','光熱費','通信','交通','趣味','その他')),
   paid_by uuid not null references auth.users(id),
   scope text not null default 'shared' check (scope in ('shared','private')),
   owner uuid not null default auth.uid() references auth.users(id),

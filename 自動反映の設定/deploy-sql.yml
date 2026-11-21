@@ -1,0 +1,20 @@
+# 暮らし帳:supabase フォルダに新しい SQL(migration_番号_*.sql)を上げたら、まだ流していない分だけ自動で流す
+name: SQLを反映
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/migration_*.sql', 'scripts/apply_sql.sh']
+  workflow_dispatch: {}   # 「Actions」画面から手で動かすこともできる
+concurrency: { group: kurashi-sql, cancel-in-progress: false }
+jobs:
+  sql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 準備ができているか
+        env: { DB_URL: '${{ secrets.SUPABASE_DB_URL }}' }
+        run: |
+          if [ -z "$DB_URL" ]; then echo "::error::GitHub の Secrets に SUPABASE_DB_URL がありません(手順書の「自動で反映する準備」)"; exit 1; fi
+      - name: SQLを流す
+        env: { DB_URL: '${{ secrets.SUPABASE_DB_URL }}' }
+        run: bash scripts/apply_sql.sh supabase

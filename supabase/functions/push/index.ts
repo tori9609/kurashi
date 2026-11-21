@@ -3,6 +3,7 @@
 // ・アプリからは「通知用の公開鍵をもらう」「テスト通知を送る」に使う。
 // 鍵は初めて動いたときに自分で作り、データベースの push_config に入れる(手で設定するものはない)。
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+export const VERSION = '2026-11-21';   // 状態チェックで「新しい版か」を見るための印
 
 const APP = 'https://tori9609.github.io/kurashi/';
 const cors = {
@@ -361,6 +362,7 @@ if (typeof Deno !== 'undefined' && Deno.serve) Deno.serve(async req => {
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const { data: { user } } = await db.auth.getUser(token);
     if (!user) return json({ error: 'ログインが必要です' }, 401);
+    if (body.action === 'version') return json({ ok: true, version: VERSION, secret: !!serverKey() });   // 状態チェック用
     if (body.action === 'key') return json({ key: cfg.public_key });
     if (body.action === 'test') {
       const { data: subs } = await db.from('push_subs').select('*').eq('user_id', user.id);

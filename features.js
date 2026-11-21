@@ -1,8 +1,17 @@
 // ふたりの暮らし帳 第2段階(予定・家事)と第3段階(家計簿)。2026-11-20
 // app.js から道具(st・sb・run など)を受け取って動く。画面は文字列で作り、app.js の render() が表示する。
-let C;
+import { evFormHtml, evSheetHtml } from './calendar.js';
+import { C, CATS, W, WS_KEY, activity, applyTheme, chk, closeBtn, dt, edge, err, field, h, ic, ls, md, memberOpts, pad, route, sb, sheetWrap, thisMonth, toNum, toast, today, val, who, yen, ymd } from './core.js';
+import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
+import { infoHtml, paperHtml, rcptHtml, readPaper, readReceipts, splitByCategory } from './receipt.js';
+import { doSearch, has, loadWidget, pushOff, pushOn, runStatus, widgetScript } from './settings.js';
+export * from './core.js';
+export * from './settings.js';
+export * from './calendar.js';
+export * from './kakeibo.js';
+export * from './receipt.js';
 export function setup(ctx) {
-  C = ctx;
+  Object.assign(C, ctx);   // 道具は core.js の C に入れて、ほかのファイルからも使う
   document.addEventListener('change', e => { if (e.target.id === 'rcptFile') readReceipts([...e.target.files]); if (e.target.id === 'paperFile') readPaper(e.target.files[0]);
     if (e.target.dataset?.cyc) { const m = document.getElementById(e.target.dataset.cyc + 'Mon'); if (m) m.disabled = e.target.value !== 'yearly'; } });
   // カレンダーを左右にスワイプ:左へ=前の月(年)、右へ=次の月(年)
@@ -26,93 +35,6 @@ function calShift(n) {
   if (!n) { const d = new Date(); st.cal = { y: d.getFullYear(), m: d.getMonth(), sel: today() }; return; }
   const d = new Date(st.cal.y, st.cal.m + n, 1); st.cal.y = d.getFullYear(); st.cal.m = d.getMonth(); st.cal.sel = ymd(d);
 }
-// ---------- 見た目(テーマ・アクセントカラー・人の色) ----------
-// ---------- アイコン(自作。24×24、線の太さ1.75、角は丸) ----------
-export const IC = {
-  home: '<path d="M4 10.4 12 4l8 6.4V19a1 1 0 0 1-1 1h-4.25v-5.25h-5.5V20H5a1 1 0 0 1-1-1z"/>',
-  cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" stroke-width="2.4"/>',
-  cart: '<path d="M3 4.5h2.1l2.2 10.3a1 1 0 0 0 1 .8h9.3a1 1 0 0 0 1-.75L20.5 8H6"/><circle cx="9.5" cy="19.3" r="1.3"/><circle cx="16.8" cy="19.3" r="1.3"/>',
-  wallet: '<path d="M18 7V5.8A1.8 1.8 0 0 0 16.2 4H6a2.5 2.5 0 0 0-2.5 2.5v11A2.5 2.5 0 0 0 6 20h12.5a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2H6a2.5 2.5 0 0 1-2.5-2.5"/><path d="M16.5 13.5h1"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
-  camera: '<path d="M4 8.6A1.6 1.6 0 0 1 5.6 7h2.1l1.5-2.2h5.6L16.3 7h2.1A1.6 1.6 0 0 1 20 8.6v8.8a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 17.4z"/><circle cx="12" cy="12.8" r="3.4"/>',
-  receipt: '<path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>',
-  doc: '<path d="M14 3.5H7.5a1.5 1.5 0 0 0-1.5 1.5v14a1.5 1.5 0 0 0 1.5 1.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5z"/><path d="M14 3.5v4h4M9 12.5h6M9 16h4"/>',
-  alarm: '<circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.4 1.5M4.5 5 6.8 3M19.5 5l-2.3-2"/>',
-  todo: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/>',
-  tick: '<path d="m5.5 12.5 4.2 4.2L18.5 8"/>',
-  star: '<path d="m12 4 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>',
-  chart: '<path d="M4 20h16M7.5 16.5v-4M12 16.5v-8M16.5 16.5v-6"/>',
-  bell: '<path d="M6.5 16.5v-5a5.5 5.5 0 0 1 11 0v5l1.5 1.5H5z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>',
-  edit: '<path d="M4.5 19.5h3.8L19 8.8a2.1 2.1 0 0 0-3-3L5.3 16.5z"/><path d="m14.5 7.3 3 3"/>',
-  income: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>',
-  card: '<rect x="3.5" y="6" width="17" height="12.5" rx="2.5"/><path d="M3.5 10.5h17M7 15h3"/>',
-  left: '<path d="m14.5 6-6 6 6 6"/>', right: '<path d="m9.5 6 6 6-6 6"/>', down: '<path d="m6 9.5 6 6 6-6"/>', up: '<path d="m6 14.5 6-6 6 6"/>',
-  cloudOff: '<path d="M4 4l16 16M8.5 8.4A5.5 5.5 0 0 0 7 18.5h10.5M18.6 15.7A3.7 3.7 0 0 0 16.5 9a5.5 5.5 0 0 0-5.6-3.4"/>',
-  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17h.01" stroke-width="2.4"/>',
-  heart: '<path d="M12 19s-7-4.3-7-9.4A3.9 3.9 0 0 1 12 7.4a3.9 3.9 0 0 1 7 2.2C19 14.7 12 19 12 19z"/>',
-};
-export const ic = (k, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k] || ''}</svg>`;
-// 基本の色(アプリ全体の色。設定で人の色にも変えられる)
-export const BRAND = '#4F46E5';
-export const PALETTE = [['青', '#0A5BD3'], ['藍', '#3F51B5'], ['紫', '#7B3FC4'], ['桃', '#C2185B'], ['赤', '#C62828'], ['橙', '#C2570C'],
-  ['茶', '#8D5524'], ['緑', '#1F7A4F'], ['青緑', '#00796B'], ['水色', '#0277A8'], ['灰', '#4A5568']];
-const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { return null; } };
-export function applyTheme() {
-  const root = document.documentElement, theme = ls('kurashi.theme') || 'auto';
-  if (theme === 'auto') delete root.dataset.theme; else root.dataset.theme = theme;
-  const acc = ls('kurashi.accent');
-  root.style.setProperty('--accent', acc === 'me' && C?.st?.me ? C.colorOf(C.st.me.user_id) : acc && acc !== 'me' ? acc : BRAND);
-  const dark = theme === 'dark' || (theme === 'auto' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0E0F12' : '#F5F6F8');
-}
-// だれの情報か:人の色の丸と名前(担当なし・ふたりは緑)
-export const who = (uid, none = 'ふたり') => uid ? `<span class="who" style="--c:${C.colorOf(uid)}"><i></i>${C.esc(C.nameOf(uid))}</span>` : `<span class="who pair"><i></i>${none}</span>`;
-const edge = uid => `style="--c:${uid ? C.colorOf(uid) : SHARED_COLOR}"`;
-export function appearanceSettingsHtml() {
-  const { st } = C, theme = ls('kurashi.theme') || 'auto', acc = ls('kurashi.accent') || '', mine = C.colorOf(st.me.user_id);
-  const th = (v, l) => `<button class="pill${theme === v ? ' on' : ''}" data-act="themeSet" data-v="${v}" aria-pressed="${theme === v}">${l}</button>`;
-  const sw = (act, v, name, cur, cls = '') => `<button class="swatch${cls}" style="--c:${v === 'me' ? mine : v || BRAND}" data-act="${act}" data-v="${v}" aria-pressed="${cur === v}" aria-label="${name}"></button>`;
-  return `<section class="card stack"><h2>見た目</h2>
-    <div class="field"><span class="muted" style="font-size:13px">明るさ</span><div class="nav" style="flex-wrap:wrap">${th('auto', 'iPhoneに合わせる')}${th('light', 'ライト')}${th('dark', 'ダーク')}</div></div>
-    <div class="field"><span class="muted" style="font-size:13px">アクセントカラー(ボタンなどの色。この端末だけの設定です)</span>
-      <div class="swatches">${sw('accentSet', '', '暮らし帳の色(標準)', acc, ' std')}${sw('accentSet', 'me', '自分の色に合わせる', acc, ' auto')}${PALETTE.map(([n, c]) => sw('accentSet', c, n, acc)).join('')}</div>
-      <p class="muted hint" style="margin:0;font-size:13px">左端が標準の色、その隣が「自分の色に合わせる」です。</p></div>
-    <div class="field"><span class="muted" style="font-size:13px">あなたの色(だれの情報かを示す印。相手の画面でも、あなたの予定・記録にこの色が付きます)</span>
-      <div class="swatches">${PALETTE.filter(([n]) => n !== '緑').map(([n, c]) => sw('myColor', c, n, mine)).join('')}</div>
-      <p class="muted hint" style="margin:0;font-size:13px">緑は「ふたり」の印なので、人の色には使いません。</p></div></section>`;
-}
-
-const sb = () => C.sb();
-const pad = n => String(n).padStart(2, '0');
-export const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-export const today = () => ymd(new Date());
-const thisMonth = () => today().slice(0, 7);
-const W = '日月火水木金土';
-const WS_KEY = 'kurashi.weekStart';
-const weekStart = () => { try { return localStorage.getItem(WS_KEY) === '1' ? 1 : 0; } catch { return 0; } };
-const wdClass = d => d === 0 ? ' sun' : d === 6 ? ' sat' : '';
-export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', 'その他'];
-const SHARED_COLOR = '#1F8A5B';
-const yen = n => '¥' + Math.round(n).toLocaleString('ja-JP');
-const dt = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
-const md = s => { const d = dt(s); return `${d.getMonth() + 1}/${d.getDate()}(${W[d.getDay()]})`; };
-const h = () => C.st.me.household_id;
-const route = () => (location.hash.replace('#', '') || 'home');
-const toast = m => C.toast(m);
-const val = id => (document.getElementById(id)?.value ?? '').trim();
-const chk = id => !!document.getElementById(id)?.checked;
-function err(msg) { const e = document.getElementById('err'); if (e) { e.textContent = msg; e.hidden = false; } return true; }
-// 全角数字やカンマが入っていても数字として読む
-const toNum = s => parseInt(String(s).replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[^\d]/g, ''), 10) || 0;
-function activity(message) { sb().from('activities').insert({ household_id: h(), message }).then(() => {}); }
-const field = (id, label, inner) => `<div class="field"><label for="${id}">${label}</label>${inner}</div>`;
-const memberOpts = (sel, blank) => (blank ? `<option value="">${blank}</option>` : '') +
-  C.st.members.map(m => `<option value="${m.user_id}" ${m.user_id === sel ? 'selected' : ''}>${C.esc(m.display_name)}</option>`).join('');
-const sheetWrap = (title, body) => `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-label="${title}" data-stop>
-  <span class="grip"></span><h2 style="font-size:17px">${title}</h2>${body}</div></div>`;
-const closeBtn = (label = '閉じる') => `<button class="btn" type="button" data-act="close">${label}</button>`;
-
 // ---------- 読み込み ----------
 export async function loadFeatures() {
   const { st, run } = C;
@@ -145,6 +67,10 @@ export async function reloadInbox() {
   if (!error) await matchFixed();
   // 金額を読み取れなかったウォレットの支払い(SQL 追加分17 の前は空のまま)
   const m = await sb().from('card_misses').select('*').order('used_at', { ascending: false }).limit(20);
+  // カードの引き落とし予定(セゾンのお知らせメールから。本人だけ。SQL 追加分19の前は空)
+  const since = ymd(new Date(Date.now() - 7 * 864e5));
+  const bl = await sb().from('card_bills').select('*').gte('pay_date', since).order('pay_date');
+  C.st.bills = bl.error ? [] : bl.data || [];
   C.st.misses = m.error ? [] : m.data || [];
 }
 // 固定費とカード利用の突き合わせ:
@@ -184,7 +110,7 @@ async function matchFixed() {
   st.fixMatched = data || [];
 }
 // 「記録しない」固定費と同じ金額のカード利用は、その固定費の分類と名前を下書きに使う
-const infoFix = i => (C.st.fixed || []).find(f => !f.active && f.paid_by === C.st.me.user_id && f.amount === i.amount);
+export const infoFix = i => (C.st.fixed || []).find(f => !f.active && f.paid_by === C.st.me.user_id && f.amount === i.amount);
 // お店の名前を比べやすい形に(全角→半角、大文字→小文字、空白・記号を取る)
 export const shopKey = x => String(x || '').normalize('NFKC').toLowerCase().replace(/[\s・,.\-_/()()「」【】*#]/g, '');
 // 覚えた分類:同じ名前 → 名前を含むもの(3文字以上・長いほど優先)
@@ -202,7 +128,7 @@ async function learnShop(shop, category) {
   if (error) return;
   if (cur) cur.category = category; else (st.shopCats ||= []).push({ owner: st.me.user_id, shop_key: k, category });
 }
-const catFor = i => learnedCat(i.merchant) || infoFix(i)?.category || guessCat(i.merchant);
+export const catFor = i => learnedCat(i.merchant) || infoFix(i)?.category || guessCat(i.merchant);
 export async function reloadEvents() { C.st.events = await C.run(sb().from('events').select('*').eq('household_id', h()).is('deleted_at', null).order('date')); }
 export async function reloadChores() { C.st.chores = await C.run(sb().from('chores').select('*').eq('household_id', h()).is('deleted_at', null).order('created_at')); }
 export async function loadTx(withFixed) {
@@ -213,14 +139,14 @@ export async function loadTx(withFixed) {
     .order('date', { ascending: false }).order('created_at', { ascending: false }));
 }
 // 支払日:1〜31(31は末日)。その月にない日(2月30日など)は末日にする
-const payDate = (mo, d) => { const [y, m] = mo.split('-').map(Number); return `${mo}-${pad(Math.min(d || 1, new Date(y, m, 0).getDate()))}`; };
+export const payDate = (mo, d) => { const [y, m] = mo.split('-').map(Number); return `${mo}-${pad(Math.min(d || 1, new Date(y, m, 0).getDate()))}`; };
 const dayText = d => (d || 1) >= 31 ? '末日' : `${d || 1}日`;
 // 支払いの間隔:毎月(monthly)・毎年(yearly。pay_month の月だけ記録)
 export const isYearly = f => f.cycle === 'yearly';
-const payThisMonth = (f, mo) => !isYearly(f) || Number(mo.slice(5)) === (f.pay_month || 1);
+export const payThisMonth = (f, mo) => !isYearly(f) || Number(mo.slice(5)) === (f.pay_month || 1);
 export const perYear = f => isYearly(f) ? f.amount : f.amount * 12;   // 1年あたり
 export const perMonth = f => isYearly(f) ? Math.round(f.amount / 12) : f.amount;   // 月あたり(年払いは12で割る)
-const cycText = f => isYearly(f) ? `毎年${f.pay_month || 1}月${dayText(f.pay_day)}` : `毎月${dayText(f.pay_day)}`;
+export const cycText = f => isYearly(f) ? `毎年${f.pay_month || 1}月${dayText(f.pay_day)}` : `毎月${dayText(f.pay_day)}`;
 // 固定費:支払日が来たら、その日付で記録する(同じ月に2回は入らない)
 async function ensureFixed(mo) {
   const t = today(), act = (C.st.fixed || []).filter(f => f.active && payThisMonth(f, mo) && payDate(mo, f.pay_day) <= t); if (!act.length) return;
@@ -229,114 +155,8 @@ async function ensureFixed(mo) {
 }
 
 // 予定タブの中の切り替え(カレンダー・やること)
-const planSeg = cur => `<div class="seg plan" role="tablist" aria-label="予定の中の切り替え"><a role="tab" href="#calendar" aria-selected="${cur === 'calendar'}">${ic('cal')}カレンダー</a><a role="tab" href="#chores" aria-selected="${cur === 'chores'}">${ic('todo')}やること</a></div>`;
-const addBtn = (act, label) => `<button class="iconbtn solid" data-act="${act}" aria-label="${label}">${ic('plus')}</button>`;
-// ---------- 予定 ----------
-function occurs(e, ds) {
-  if (ds < e.date || e.exdates?.includes(ds)) return false;
-  if (!e.repeat_rule) return ds === e.date;
-  const [kind, arg] = e.repeat_rule.split(':');
-  if (kind === 'weekly') return arg.split(',').map(Number).includes(dt(ds).getDay());
-  if (kind === 'monthly') return dt(ds).getDate() === Number(arg);
-  return false;
-}
-export const eventsOn = ds => (C.st.events || []).filter(e => occurs(e, ds)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-const evColor = e => e.for_user ? C.colorOf(e.for_user) : SHARED_COLOR;
-const SRC = { google: 'Google', iphone: 'iPhone' };
-const imported = e => e.source && e.source !== 'app';
-const timeText = e => e.time ? e.time.slice(0, 5) + (e.end_time ? '〜' + e.end_time.slice(0, 5) : '') : '終日';
-const repText = r => !r ? '' : r.startsWith('weekly') ? `毎週${r.split(':')[1].split(',').map(n => W[n]).join('・')}曜日` : `毎月${r.split(':')[1]}日`;
-export const evRow = e => `<button class="row" data-act="evOpen" data-id="${e.id}" ${edge(e.for_user)}><span class="dot" style="background:${evColor(e)}"></span>
-  <span class="main"><span class="name">${C.esc(e.title)}</span><span class="sub">${timeText(e)}・${who(e.for_user)}${e.repeat_rule ? '・くり返し' : ''}${imported(e) ? '・' + SRC[e.source] : ''}${e.is_private ? '・自分だけ' : ''}</span></span></button>`;
-
-export function viewCalendar() {
-  const { st } = C, { y, m, sel } = st.cal;
-  const ws = weekStart(), lead = (new Date(y, m, 1).getDay() - ws + 7) % 7, days = new Date(y, m + 1, 0).getDate();
-  const total = Math.ceil((lead + days) / 7) * 7;
-  let cells = '';
-  for (let k = 0; k < total; k++) {
-    const d = new Date(y, m, 1 - lead + k), ds = ymd(d), out = d.getMonth() !== m, evs = eventsOn(ds);
-    cells += `<button class="day${out ? ' out' : ''}${wdClass(d.getDay())}${ds === sel ? ' sel' : ''}${ds === today() ? ' today' : ''}" data-act="calDay" data-d="${ds}" aria-label="${d.getMonth() + 1}月${d.getDate()}日、予定${evs.length}件">
-      <span>${d.getDate()}</span><i>${evs.slice(0, 3).map(e => `<b style="background:${evColor(e)}"></b>`).join('')}</i></button>`;
-  }
-  if (st.cal.view === 'year') return viewYear();
-  const list = eventsOn(sel);
-  return `<main class="screen">
-  ${planSeg('calendar')}
-  <div class="head"><div><small>${y}年</small><h1><button class="ttl" data-act="calYear" aria-label="${y}年${m + 1}月。押すと1年分の一覧">${m + 1}月<span class="caret">${ic('down')}</span></button></h1></div>
-    <div class="nav"><button class="iconbtn" data-act="calMove" data-n="-1" aria-label="前の月">${ic('left')}</button><button class="pill" data-act="calMove" data-n="0">今日</button><button class="iconbtn" data-act="calMove" data-n="1" aria-label="次の月">${ic('right')}</button>${addBtn('evNew', '予定を追加')}</div></div>
-  <section class="card"><div class="cal">${[0, 1, 2, 3, 4, 5, 6].map(i => (i + ws) % 7).map(d => `<span class="wd${wdClass(d)}">${W[d]}</span>`).join('')}${cells}</div></section>
-  <section class="card list"><h2 class="group-title">${md(sel)}の予定</h2>
-    ${list.length ? list.map(evRow).join('') : '<p class="muted" style="margin:0 0 10px">予定はありません</p>'}</section>
-  <label class="btn icon-left">${ic('doc')}紙のお知らせから予定を作る<input id="paperFile" type="file" accept="image/*" hidden></label>
-  <p class="muted hint" style="margin:-4px 4px 0;font-size:12.5px">学校や病院のお知らせ・予約票を撮ると、日付と予定を読み取ります。登録の前に確かめられます。</p></main>`;
-}
-
-// 1年分の一覧:12か月の小さなカレンダー。予定のある日に印、押すとその日へ
-function viewYear() {
-  const { st } = C, yy = st.cal.yy, td = today();
-  let months = '';
-  for (let m = 0; m < 12; m++) {
-    const start = (new Date(yy, m, 1).getDay() - weekStart() + 7) % 7, days = new Date(yy, m + 1, 0).getDate();
-    let cells = '<span></span>'.repeat(start), cnt = 0;
-    for (let d = 1; d <= days; d++) {
-      const ds = `${yy}-${pad(m + 1)}-${pad(d)}`, has = eventsOn(ds).length > 0; if (has) cnt++;
-      cells += `<button class="yd${has ? ' has' : ''}${ds === td ? ' today' : ''}" data-act="calPick" data-d="${ds}" aria-label="${m + 1}月${d}日${has ? '、予定あり' : ''}">${d}</button>`;
-    }
-    const cur = yy === st.cal.y && m === st.cal.m;
-    months += `<div class="ym${cur ? ' cur' : ''}"><button class="ymt" data-act="calPick" data-d="${yy}-${pad(m + 1)}-01">${m + 1}月${cnt ? `<small>${cnt}日</small>` : ''}</button>
-      <div class="ycal">${cells}</div></div>`;
-  }
-  return `<main class="screen">
-  ${planSeg('calendar')}
-  <div class="head"><div><h1><button class="ttl" data-act="calYear" aria-label="月の表示に戻る">${yy}年<span class="caret">${ic('up')}</span></button></h1></div>
-    <div class="nav"><button class="iconbtn" data-act="calYearMove" data-n="-1" aria-label="前の年">${ic('left')}</button><button class="pill" data-act="calYearMove" data-n="0">今年</button><button class="iconbtn" data-act="calYearMove" data-n="1" aria-label="次の年">${ic('right')}</button></div></div>
-  <p class="muted hint" style="margin:0;font-size:13px">月の名前を押すとその月へ、日を押すとその日の予定へ移ります。青い日は予定のある日です。</p>
-  <section class="card"><div class="ygrid">${months}</div></section></main>`;
-}
-
-// 予定の追加・修正(s.edit があれば修正)。見せる範囲は件名のすぐ下に置き、うっかり共有を防ぐ
-export const REMIND = [['', 'なし'], ['0', '予定の時刻'], ['10', '10分前'], ['30', '30分前'], ['60', '1時間前'], ['120', '2時間前'], ['1440', '前日の同じ時刻']];
-function evFormHtml() {
-  const { st, esc } = C, s = st.sheet, base = s.base ? st.events.find(x => x.id === s.base) : null;
-  const e = s.edit ? st.events.find(x => x.id === s.edit) : base;   // 「この日だけ変更」は、元のくり返しの内容を下書きにする
-  const mine = !e || e.created_by === st.me.user_id, rep = base ? '' : e?.repeat_rule ? e.repeat_rule.split(':')[0] : '';
-  const opt = (v, l, cur) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
-  const rmd = e?.remind_min == null ? '' : String(e.remind_min);
-  return sheetWrap(base ? `${md(s.day)}だけ変更` : e ? (e.repeat_rule ? 'すべての回を直す' : '予定を直す') : '予定を追加', `<form class="stack" data-form="ev" novalidate>
-    ${base ? `<p class="muted hint" style="margin:0;font-size:13px">くり返しの予定「${esc(base.title)}」の${md(s.day)}の回だけを変えます。ほかの回はそのままです。</p>` : ''}
-    ${field('evTitle', 'タイトル', `<input id="evTitle" type="text" maxlength="80" placeholder="例：歯医者" value="${esc(e?.title || '')}">`)}
-    ${mine ? `<label class="check"><input id="evPriv" type="checkbox" ${e?.is_private ? 'checked' : ''}> 自分だけに表示する(相手には見えません)</label>`
-      : '<p class="muted hint" style="margin:0;font-size:13px">相手が登録した予定なので、見せる範囲は相手だけが変えられます。</p>'}
-    <div class="two">${field('evDate', '日付', `<input id="evDate" type="date" value="${base ? s.day : e?.date || st.cal.sel}">`)}${field('evTime', '時刻(空なら終日)', `<input id="evTime" type="time" value="${e?.time ? e.time.slice(0, 5) : ''}">`)}</div>
-    ${field('evEnd', '終わりの時刻(なくてもよい)', `<input id="evEnd" type="time" value="${e?.end_time ? e.end_time.slice(0, 5) : ''}">`)}
-    ${field('evFor', 'だれの予定', `<select id="evFor">${memberOpts(e ? e.for_user : null, 'ふたり')}</select>`)}
-    ${base ? '' : field('evRep', 'くり返し', `<select id="evRep">${opt('', 'なし', rep)}${opt('weekly', '毎週(同じ曜日)', rep)}${opt('monthly', '毎月(同じ日)', rep)}</select>`)}
-    ${field('evRemind', 'お知らせ(時刻のある予定)', `<select id="evRemind">${REMIND.map(([v, l]) => opt(v, l, rmd)).join('')}</select>`)}
-    <p class="muted hint" style="margin:-4px 0 0;font-size:13px">終日の予定は、朝7時と前日20時のまとめでお知らせします。</p>
-    <p class="err" id="err" hidden></p>
-    <button class="btn primary" type="submit">${e ? '保存する' : '追加する'}</button>${closeBtn('やめる')}</form>`);
-}
-
-function evSheetHtml() {
-  const { st, esc } = C, s = st.sheet, e = st.events.find(x => x.id === s.id);
-  if (!e) return '';
-  const cm = s.comments;
-  return sheetWrap(esc(e.title), `
-    <p class="muted" style="margin:0">${md(s.day || e.date)} ${timeText(e)}・${e.for_user ? esc(C.nameOf(e.for_user)) : 'ふたり'}の予定${e.repeat_rule ? '・' + repText(e.repeat_rule) : ''}<br>${imported(e) ? `${SRC[e.source]}のカレンダー「${esc(e.calendar_name || '')}」から取り込み。内容は${SRC[e.source]}のカレンダーで直してください` : esc(C.nameOf(e.created_by)) + 'さんが登録'}</p>
-    ${e.created_by === st.me.user_id ? `<div class="row" style="border:0;min-height:44px"><span class="main"><span class="name">${e.is_private ? '自分だけに見えています' : 'ふたりに見えています'}</span></span>
-      <button class="pill ${e.is_private ? '' : 'go on'}" data-act="evShare">${e.is_private ? 'ふたりに見せる' : '自分だけにする'}</button></div>` : ''}
-    <div class="comments">${cm === null ? '<p class="muted" style="margin:0">コメントを読み込み中…</p>' : cm.length ? cm.map(c => `<div class="cmt"><span class="dot" style="background:${C.colorOf(c.user_id)}"></span><div><b>${esc(C.nameOf(c.user_id))}</b> ${esc(c.body)}</div></div>`).join('') : '<p class="muted" style="margin:0">コメントはまだありません</p>'}</div>
-    <form class="addrow" data-form="cmt"><label class="sr" for="cmtBody">コメント</label><input id="cmtBody" type="text" maxlength="300" placeholder="コメントを書く" autocomplete="off"><button class="plus" type="submit" aria-label="送る">↑</button></form>
-    ${e.series_id && !imported(e) ? `<p class="muted hint" style="margin:0;font-size:13px">くり返しの予定「${esc(st.events.find(x => x.id === e.series_id)?.title || '')}」の、この日だけ変えた回です。</p>` : ''}
-    ${imported(e) ? '' : e.repeat_rule ? `<div class="two"><button class="btn" data-act="evOnly">${md(s.day)}だけ変更</button><button class="btn" data-act="evSkip">${md(s.day)}だけ休み</button></div>
-      <button class="btn" data-act="evEdit">すべての回を直す</button>
-      ${(e.exdates || []).length ? `<div class="list"><p class="muted hint" style="margin:4px 0 0;font-size:13px">休み・変更にした日</p>${[...e.exdates].sort().map(x => `<div class="row"><span class="main"><span class="name">${md(x)}</span></span><button class="pill" data-act="evUnskip" data-d="${x}">元に戻す</button></div>`).join('')}</div>` : ''}`
-      : '<button class="btn" data-act="evEdit">内容を直す</button>'}
-    ${imported(e) ? '' : s.confirm ? `<button class="btn danger" data-act="evDelYes">本当に削除する${e.repeat_rule ? '(くり返しのすべての回)' : ''}(7日間はゴミ箱から戻せます)</button>` : `<button class="btn danger" data-act="evDel">${e.repeat_rule ? 'くり返しをすべて削除' : 'この予定を削除'}</button>`}
-    ${closeBtn()}`);
-}
-
+export const planSeg = cur => `<div class="seg plan" role="tablist" aria-label="予定の中の切り替え"><a role="tab" href="#calendar" aria-selected="${cur === 'calendar'}">${ic('cal')}カレンダー</a><a role="tab" href="#chores" aria-selected="${cur === 'chores'}">${ic('todo')}やること</a></div>`;
+export const addBtn = (act, label) => `<button class="iconbtn solid" data-act="${act}" aria-label="${label}">${ic('plus')}</button>`;
 // ---------- やること(旧・家事) ----------
 // くり返し:once(1回だけ・期限は任意)/ daily / weekly(曜日)/ monthly(前回から30日)
 // 完了:チェックで今回分を完了。くり返しは次の回に自動で戻る。1回だけは「完了したもの」へ移り、「復活」で戻せる。
@@ -351,9 +171,9 @@ export function choreDue(c, ds = today()) {
   return days >= 7;
 }
 export const INCOME_CATS = ['給与', '投資', '臨時収入', 'その他の収入'];
-const isIncome = t => t?.kind === 'income';
+export const isIncome = t => t?.kind === 'income';
 export const TODO_CATS = ['家事', '用事・手続き', '買い物', '仕事', 'お金', '健康', 'その他'];
-const freqText = c => ({ daily: '毎日', monthly: '月1回', once: '1回だけ' }[c.freq] || (c.weekdays ? '毎週' + c.weekdays.split(',').map(n => W[n]).join('・') : '週1回'));
+export const freqText = c => ({ daily: '毎日', monthly: '月1回', once: '1回だけ' }[c.freq] || (c.weekdays ? '毎週' + c.weekdays.split(',').map(n => W[n]).join('・') : '週1回'));
 const isFinished = c => c.archived || (c.freq === 'once' && c.last_done && c.last_done !== today());
 const canPrivChore = c => !c || !c.created_by || c.created_by === C.st.me.user_id;
 export function choreRow(c) {
@@ -387,7 +207,7 @@ export function viewChores() {
   <section class="card list"><h2 class="group-title">これから・くり返し</h2>
     ${rest.length ? rest.map(choreRow).join('') : `<p class="muted" style="margin:0 0 10px">${all.length ? 'ありません' : '右上の「＋」から、ゴミ出し・掃除・手続きなどを登録してください'}</p>`}</section>
   ${fin.length ? `<section class="card list"><button class="group-title plain fold" data-act="choreDoneFold" aria-expanded="${!!open}">完了したもの・お休み中(${fin.length}) ${ic(open ? 'up' : 'down')}</button>
-    ${open ? fin.slice(0, 30).map(choreRow).join('') + '<p class="muted hint" style="margin:4px 0 8px;font-size:13px">チェックを外すと未完了に戻ります(復活)。「お休み中」はくり返しを終えたものです。</p>' : ''}</section>` : ''}
+    ${open ? fin.slice(0, 30).map(choreRow).join('') + '<p class="muted hint" style="margin:4px 0 8px;font-size:0.8125rem">チェックを外すと未完了に戻ります(復活)。「お休み中」はくり返しを終えたものです。</p>' : ''}</section>` : ''}
 </main>`;
 }
 // 追加と修正で共通の入力欄
@@ -395,7 +215,7 @@ function choreFields(c) {
   const o = (v, l) => `<option value="${v}" ${(c?.freq || 'once') === v ? 'selected' : ''}>${l}</option>`;
   const wd = (c?.weekdays || '').split(',');
   const scope = canPrivChore(c) ? field('chScope', '見せる範囲', `<select id="chScope"><option value="shared">ふたりに見せる</option><option value="private" ${c?.is_private ? 'selected' : ''}>自分だけ(相手には見えません)</option></select>`)
-    : '<p class="muted hint" style="margin:0;font-size:13px">相手が登録したものなので、見せる範囲は相手だけが変えられます。</p>';
+    : '<p class="muted hint" style="margin:0;font-size:0.8125rem">相手が登録したものなので、見せる範囲は相手だけが変えられます。</p>';
   return `${field('chName', '名前', `<input id="chName" type="text" maxlength="40" placeholder="例：燃えるゴミ出し・車検の予約" value="${C.esc(c?.name || '')}">`)}
     ${scope}
     <fieldset class="chips"><legend>分類</legend>${TODO_CATS.map(k => `<label><input type="radio" name="chCat" value="${k}" ${(c?.category || C.st.choreCat || '家事') === k ? 'checked' : ''}><span>${k}</span></label>`).join('')}</fieldset>
@@ -415,439 +235,10 @@ function choreSheetHtml() {
     : once ? '' : `<button class="btn" data-act="choreArchive" data-id="${c.id}">くり返しを終える(お休みにする)</button>`;
   return sheetWrap(`「${C.esc(c.name)}」を直す`, `<p class="muted" style="margin:0">${c.archived ? 'お休み中' : freqText(c)}${c.last_done ? '・' + (once ? '完了 ' : '前回 ') + md(c.last_done) : '・まだやっていません'}</p>
     <form class="stack" data-form="choreEdit" novalidate>${choreFields(c)}
-    <p class="muted hint" style="margin:0;font-size:13px">「1回だけ」を「毎週」などに変えると、くり返しのやることになります(固定化)。</p>
+    <p class="muted hint" style="margin:0;font-size:0.8125rem">「1回だけ」を「毎週」などに変えると、くり返しのやることになります(固定化)。</p>
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">保存する</button></form>
     ${state}
     ${s.confirm ? '<button class="btn danger" data-act="choreDelYes">本当に削除する(7日間はゴミ箱から戻せます)</button>' : '<button class="btn danger" data-act="choreDel">削除する</button>'}${closeBtn()}`);
-}
-
-// ---------- 家計簿 ----------
-// お店の名前から分類を推測する。前に同じお店で記録した分類があれば、それを優先する
-const GUESS = [
-  ['家具・家電', ['ニトリ', 'ヨドバシ', 'ビック', 'ケーズ', 'エディオン', 'ヤマダ', 'IKEA', 'イケア', 'ジョーシン']],
-  ['日用品', ['ドラッグ', '薬局', 'マツモトキヨシ', 'スギ', 'ウエルシア', 'ツルハ', 'コスモス', 'ダイソー', 'セリア', 'カインズ', 'コメリ', '無印']],
-  ['外食', ['マクドナルド', 'スターバックス', 'スタバ', 'すき家', '吉野家', '松屋', 'ガスト', 'サイゼリヤ', 'コメダ', 'ドトール', 'くら寿司', 'スシロー', 'はま寿司', 'レストラン', 'カフェ', '食堂', 'ラーメン']],
-  ['交通', ['ENEOS', 'エネオス', '出光', 'apollostation', 'コスモ石油', 'JR', '名鉄', 'タクシー', 'パーキング', '駐車', 'ETC', 'モビリティ']],
-  ['光熱費', ['電力', 'ガス', '水道']],
-  ['通信', ['docomo', 'ドコモ', 'au ', 'KDDI', 'ソフトバンク', 'SoftBank', '楽天モバイル', 'ahamo', 'povo']],
-  ['食費', ['イオン', 'AEON', 'スーパー', 'ドミー', 'アピタ', 'ピアゴ', 'バロー', 'フィール', 'ヤマナカ', '業務スーパー', 'セブン', 'ローソン', 'ファミリーマート', 'ミニストップ', 'コストコ', 'マックスバリュ', 'フレッシュ']],
-];
-export function guessCat(shop) {
-  const s = String(shop || ''), past = (C.st.tx || []).find(t => t.shop && t.shop === s);
-  if (past) return past.category;
-  const hit = GUESS.find(([, ks]) => ks.some(k => s.toLowerCase().includes(k.toLowerCase())));
-  return hit ? hit[0] : 'その他';
-}
-const inboxDate = i => ymd(new Date(i.used_at));
-export const inboxCount = () => (C.st.inbox || []).length;
-// ウォレットから届いたが、金額を読み取れなかった支払い:届いた値を見せて、手で記録できるようにする
-function missesHtml() {
-  const { st, esc } = C, ms = st.misses || []; if (!ms.length) return '';
-  const when = d => new Date(d).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return `<section class="card list miss"><h2 class="group-title">${ic('card')}金額が届かなかった支払い(${ms.length})</h2>
-    <p class="muted" style="margin:0 0 4px;font-size:13px">ウォレットから届いたものの、金額を読み取れませんでした。「記録する」で金額を入れてください。</p>
-    ${ms.map(m => `<div class="row"><span class="main"><span class="name">${esc(m.merchant || '(お店の名前なし)')}</span>
-      <span class="sub">${when(m.used_at)}・${esc(m.card || 'カード')}・届いた値「${esc(m.amount_raw || '空')}」</span></span>
-      <button class="pill" data-act="missRec" data-id="${m.id}">記録する</button><button class="pill" data-act="missDel" data-id="${m.id}" aria-label="消す">消す</button></div>`).join('')}</section>`;
-}
-function inboxHtml() {
-  const { st, esc } = C, ib = st.inbox || [];
-  if (!ib.length) return '';
-  return `<section class="card list"><h2 class="group-title">カード利用・レシートの確認待ち(${ib.length})</h2>
-    <p class="muted hint" style="margin:0 0 4px;font-size:13px">押して分類を選ぶと家計簿に入ります。家計簿に入れないもの(仕事・アパートの分など)は「記録しない」を選んでください。自分にだけ見えています。</p>
-    <button class="btn" style="margin:4px 0" data-act="inboxBulk">推測の分類のまま、まとめて記録(${ib.length}件)</button>
-    ${ib.map(i => `<button class="row" data-act="inboxOpen" data-id="${i.id}"><span class="main"><span class="name">${esc(i.merchant || '(お店の名前なし)')}</span>
-      <span class="sub">${md(inboxDate(i))}・${esc(i.card || 'カード')}${i.items ? `・品目${i.items.length}件(${catsOf(i).join('・')})` : '・推測:' + catFor(i)}${!i.items && infoFix(i) ? `・固定費「${esc(infoFix(i).name)}」と同じ金額` : ''}</span>
-      ${i.note ? `<span class="sub" style="color:var(--red)">${esc(i.note)}</span>` : ''}</span><b>${yen(i.amount)}</b></button>`).join('')}</section>`;
-}
-const monthLabel = mo => `${Number(mo.slice(0, 4))}年${Number(mo.slice(5))}月`;
-const shiftMonth = (mo, n) => { const [y, m] = mo.split('-').map(Number); return ymd(new Date(y, m - 1 + n, 1)).slice(0, 7); };
-// 精算:ふたりの支出を人数で割り、払った額との差を出す
-function settle() {
-  const { st } = C, shared = (st.tx || []).filter(t => t.scope === 'shared' && !isIncome(t));
-  const total = shared.reduce((a, t) => a + t.amount, 0), n = st.members.length || 1, share = total / n;
-  const bal = st.members.map(m => { const paid = shared.filter(t => t.paid_by === m.user_id).reduce((a, t) => a + t.amount, 0); return { m, paid, diff: paid - share }; });
-  return { total, share, bal };
-}
-export const sharedTotal = () => settle().total;
-// 今月あと使える額:予算の合計 − ふたりの支出 − これから払う固定費(予算のある分類だけ)を、今日を含む残りの日数で割る
-export function perDay() {
-  const st = C.st, bud = (st.budgets || []).filter(b => b.amount > 0); if (!bud.length || st.kb?.month !== thisMonth()) return null;
-  const cats = new Set(bud.map(b => b.category)), budget = bud.reduce((a, b) => a + b.amount, 0), spent = settle().total;
-  const done = new Set((st.tx || []).filter(t => t.fixed_cost_id).map(t => t.fixed_cost_id)), t0 = today();
-  const upcoming = (st.fixed || []).filter(f => f.active && f.scope !== 'private' && cats.has(f.category) && !done.has(f.id) && payThisMonth(f, thisMonth()) && payDate(thisMonth(), f.pay_day) > t0).reduce((a, f) => a + f.amount, 0);
-  const d = new Date(), left = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate() - d.getDate() + 1, rest = budget - spent - upcoming;
-  return { budget, spent, upcoming, left, rest, day: Math.floor(rest / left) };
-}
-// ホームのお金のカード:あと使える額(大きく)と、今月のふたりの支出
-export function moneyCardHtml() {
-  if (!isThisMonth()) return '';
-  const p = perDay(), spent = sharedTotal();
-  if (!p) return `<a class="card money" href="#kakeibo"><small>今月のふたりの支出</small><b class="big">${yen(spent)}</b>
-    <span class="muted" style="font-size:13px">家計簿の「予算」を決めると、1日あたりあと使える額が出ます</span></a>`;
-  const used = Math.min(100, Math.round((p.spent + p.upcoming) / p.budget * 100)), over = p.rest < 0;
-  return `<a class="card money${over ? ' over' : ''}" href="#kakeibo"><small>${over ? '今月の予算' : '今月あと使える'}</small>
-    <b class="big">${over ? `${yen(-p.rest)} 超えそう` : `1日 ${yen(p.day)}`}</b>
-    <span class="meter" role="img" aria-label="予算の${used}%"><i style="width:${used}%"></i></span>
-    <span class="muted" style="font-size:12.5px">ふたりの支出 ${yen(spent)}${p.upcoming ? `・これから払う固定費 ${yen(p.upcoming)}` : ''}・予算 ${yen(p.budget)}・あと${p.left}日</span></a>`;
-}
-export function perDayHtml() {
-  const p = perDay(); if (!p) return '';
-  return p.rest >= 0
-    ? `<p style="margin:4px 0 0">今日から月末まで <b style="font-size:20px;color:var(--green)">1日 ${yen(p.day)}</b> 使えます</p><p class="muted hint" style="margin:0;font-size:12.5px">予算 ${yen(p.budget)} − 使った分 ${yen(p.spent)}${p.upcoming ? ` − これから払う固定費 ${yen(p.upcoming)}` : ''} = 残り ${yen(p.rest)}(あと${p.left}日)</p>`
-    : `<p style="margin:4px 0 0;color:var(--red);font-weight:700">予算を ${yen(-p.rest)} 超えそうです</p><p class="muted hint" style="margin:0;font-size:12.5px">予算 ${yen(p.budget)} − 使った分 ${yen(p.spent)}${p.upcoming ? ` − これから払う固定費 ${yen(p.upcoming)}` : ''}</p>`;
-}
-export const isThisMonth = () => C.st.kb?.month === thisMonth();
-
-export function viewKakeibo() {
-  const { st } = C, kb = st.kb;
-  const tabs = [['list', '記録'], ['review', 'ふり返り'], ['fixed', '固定費'], ['budget', '予算'], ['goals', '目標貯金']];
-  const body = { list: kbList, review: kbReview, fixed: kbFixed, budget: kbBudget, goals: kbGoals }[kb.tab]();
-  return `<main class="screen">
-  <div class="head"><div><small>${Number(kb.month.slice(0, 4))}年</small><h1>${Number(kb.month.slice(5))}月</h1></div>
-    <div class="nav"><button class="iconbtn" data-act="kbMove" data-n="-1" aria-label="前の月">${ic('left')}</button><button class="pill" data-act="kbMove" data-n="0">今月</button><button class="iconbtn" data-act="kbMove" data-n="1" aria-label="次の月">${ic('right')}</button>${addBtn('txNew', '支出を記録')}</div></div>
-  <div class="seg" role="tablist" style="grid-template-columns:repeat(${tabs.length},1fr)">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${kb.tab === k}" data-act="kbTab" data-t="${k}">${l}</button>`).join('')}</div>
-  ${body}</main>`;
-}
-// ふり返り:6か月のふたりの支出の推移と、この月の分類ごとの前の月との比べ
-async function loadReview(mo) {
-  const from = shiftMonth(mo, -5) + '-01', to = shiftMonth(mo, 1) + '-01';
-  const { data, error } = await sb().from('transactions').select('date,amount,category,scope,kind,paid_by').eq('household_id', h())
-    .is('deleted_at', null).gte('date', from).lt('date', to);
-  C.st.review = { mo, rows: error ? [] : data || [] };
-}
-function kbReview() {
-  const { st } = C, mo = st.kb.month;
-  if (st.review?.mo !== mo) { st.review = { mo, rows: null }; loadReview(mo).then(() => C.render()).catch(() => {}); }
-  const rows = st.review.rows;
-  if (!rows) return '<section class="card"><p class="muted" style="margin:0">読み込んでいます…</p></section>';
-  const exp = rows.filter(t => t.scope === 'shared' && t.kind !== 'income');
-  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(mo, i - 5));
-  const tot = months.map(m => exp.filter(t => t.date.startsWith(m)).reduce((a, t) => a + t.amount, 0)), max = Math.max(1, ...tot);
-  const prev = shiftMonth(mo, -1), cur = tot.at(-1), pv = tot.at(-2);
-  const diff = pv ? Math.round((cur - pv) / pv * 100) : null;
-  const byCat = c => m => exp.filter(t => t.category === c && t.date.startsWith(m)).reduce((a, t) => a + t.amount, 0);
-  const cats = CATS.map(c => ({ c, now: byCat(c)(mo), before: byCat(c)(prev) })).filter(x => x.now || x.before).sort((a, b) => b.now - a.now);
-  const top = cats[0];
-  const lbl = m => `${Number(m.slice(5))}月`;
-  return `<section class="card"><h2>${lbl(mo)}のふたりの支出</h2>
-    <p style="margin:0;font-size:26px;font-weight:700">${yen(cur)}</p>
-    <p class="muted" style="margin:0">${diff === null ? '前の月の記録はありません' : `前の月(${yen(pv)})より ${diff >= 0 ? '+' : ''}${diff}%`}${top?.now ? `・いちばん多いのは${top.c} ${yen(top.now)}` : ''}</p></section>
-  <section class="card"><h2 class="group-title">6か月の推移(ふたりの支出)</h2>
-    <div class="rbars" role="img" aria-label="6か月のふたりの支出の推移">${months.map((m, i) => `<div class="rbar${m === mo ? ' cur' : ''}"><span class="v">${tot[i] ? Math.round(tot[i] / 1000) + '千' : ''}</span><i style="height:${Math.round(tot[i] / max * 100)}%"></i><span class="m">${lbl(m)}</span></div>`).join('')}</div></section>
-  <section class="card list"><h2 class="group-title">分類ごと(${lbl(mo)}と${lbl(prev)})</h2>
-    ${cats.length ? `<table class="rtable"><thead><tr><th>分類</th><th>${lbl(mo)}</th><th>${lbl(prev)}</th><th>差</th></tr></thead><tbody>${cats.map(x => {
-      const d = x.now - x.before; return `<tr><td>${x.c}</td><td>${yen(x.now)}</td><td>${yen(x.before)}</td><td class="${d > 0 ? 'minus' : d < 0 ? 'plus' : ''}">${d > 0 ? '+' : d < 0 ? '−' : ''}${yen(Math.abs(d))}</td></tr>`; }).join('')}</tbody></table>`
-      : '<p class="muted" style="margin:0 0 8px">この月の記録はまだありません</p>'}
-    <p class="muted hint" style="margin:6px 0 0;font-size:13px">ふたりの支出だけを数えています(自分だけの支出・収入は入りません)。差の赤は増えた分、緑は減った分です。</p></section>`;
-}
-function kbList() {
-  const { st, esc } = C, tx = st.tx || [];
-  const { total, bal } = settle();
-  const priv = tx.filter(t => t.scope === 'private' && !isIncome(t)).reduce((a, t) => a + t.amount, 0);
-  const inc = tx.filter(isIncome), me = st.me.user_id, sumOf = a => a.reduce((x, t) => x + t.amount, 0);
-  const myIn = sumOf(inc.filter(t => t.paid_by === me)), myOut = sumOf(tx.filter(t => !isIncome(t) && t.paid_by === me)), bal0 = myIn - myOut;
-  const byCat = CATS.map(c => ({ c, spent: tx.filter(t => t.scope === 'shared' && !isIncome(t) && t.category === c).reduce((a, t) => a + t.amount, 0), budget: (st.budgets.find(b => b.category === c) || {}).amount || 0 }))
-    .filter(x => x.spent || x.budget);
-  const settled = st.settles.find(s => s.month === st.kb.month);
-  let settleHtml = '';
-  if (st.members.length >= 2 && total) {
-    const sorted = [...bal].sort((a, b) => a.diff - b.diff);
-    const msg = st.members.length === 2
-      ? (Math.round(sorted[1].diff) > 0 ? `<b>${esc(sorted[0].m.display_name)}さん → ${esc(sorted[1].m.display_name)}さんに ${yen(sorted[1].diff)}</b> 払うと半分ずつになります` : 'ちょうど半分ずつです')
-      : bal.map(b => `${esc(b.m.display_name)}:${b.diff >= 0 ? '+' : '−'}${yen(Math.abs(b.diff))}`).join(' / ');
-    settleHtml = `<section class="card"><h2>精算(ふたりの支出を人数で割る)</h2>
-      <p style="margin:0">${bal.map(b => `${esc(b.m.display_name)}さん ${yen(b.paid)}`).join('・')}</p><p style="margin:0">${msg}</p>
-      ${settled ? `<p class="muted" style="margin:0">${new Date(settled.settled_at).toLocaleDateString('ja-JP')}に${esc(C.nameOf(settled.settled_by))}さんが精算済みにしました</p><button class="btn" data-act="unsettle">精算済みを取り消す</button>`
-        : '<button class="btn green" data-act="settle">精算済みにする</button>'}</section>`;
-  }
-  const days = [...new Set(tx.map(t => t.date))];
-  return `<section class="card" style="padding:12px 16px"><label class="btn green" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
-      ${ic('camera')}レシートを読み込む<input id="rcptFile" type="file" accept="image/*" multiple hidden></label>
-    <p class="muted hint" style="margin:0;font-size:12px">撮影するか、写真を何枚か選ぶと、品目ごとに読み取って「確認待ち」に入れます(読み取りはGoogleのGeminiを使います)。</p></section>
-  ${missesHtml()}${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
-    ${inc.length ? `<div class="sum"><div><small>収入(見えている分)</small><b class="plus">+${yen(sumOf(inc))}</b></div><div><small>自分の収支(自分の収入 − 自分が払った分)</small><b class="${bal0 >= 0 ? 'plus' : 'minus'}">${bal0 >= 0 ? '+' : '−'}${yen(Math.abs(bal0))}</b></div></div>` : ''}
-    <button class="btn text" data-act="txNewIncome" style="padding:0;min-height:40px;align-self:flex-start">${ic('income')}収入を記録</button>
-    ${byCat.map(x => `<div class="bar"><span>${x.c}</span><span>${yen(x.spent)}${x.budget ? ' / ' + yen(x.budget) : ''}</span>
-      ${x.budget ? `<i><b style="width:${Math.min(100, x.spent / x.budget * 100)}%;background:${x.spent > x.budget ? 'var(--red)' : 'var(--blue)'}"></b></i>` : ''}</div>`).join('')}
-  </section>
-  ${settleHtml}
-  <section class="card list"><h2 class="group-title">記録(${tx.length}件)</h2>
-    ${days.length ? days.map(d => `<h3 class="day-title">${md(d)}</h3>` + tx.filter(t => t.date === d).map(t => `<button class="row" data-act="txOpen" data-id="${t.id}" ${edge(t.paid_by)}>
-      <span class="dot" style="background:${C.colorOf(t.paid_by)}"></span><span class="main"><span class="name">${esc(t.shop || t.category)}</span>
-      <span class="sub">${isIncome(t) ? '<span class="ctag inc">収入</span>・' : ''}${t.category}・${who(t.paid_by)}が${isIncome(t) ? '受け取った' : '払った'}${t.scope === 'private' ? '・自分だけ' : ''}${t.fixed_cost_id ? '・固定費' : ''}${t.receipt_path ? '・写真あり' : ''}</span></span><b${isIncome(t) ? ' class="plus"' : ''}>${isIncome(t) ? '+' : ''}${yen(t.amount)}</b></button>`).join('')).join('')
-      : '<p class="muted" style="margin:0 0 10px">この月の記録はまだありません</p>'}
-    ${tx.length ? '<button class="btn text" data-act="csv">この月をCSVで書き出す</button>' : ''}</section>
-`;
-}
-function txFormHtml() {
-  const { st, esc } = C, s = st.sheet, t = s.edit ? (st.tx || []).find(x => x.id === s.edit) : null;
-  const kind = s.kind || (t ? t.kind || 'expense' : 'expense'), inc = kind === 'income', cats = inc ? INCOME_CATS : CATS;
-  const def = cats.includes(s.cat) ? s.cat : inc ? '給与' : '食費';
-  const date = s.date || (st.kb.month === thisMonth() ? today() : st.kb.month + '-01');
-  const mine = !t || t.owner === st.me.user_id, scope = s.scope || (inc ? 'private' : 'shared');   // 収入は、初めは自分だけ
-  const sc = (v, l) => `<option value="${v}" ${v === scope ? 'selected' : ''}>${l}</option>`;
-  const kd = (v, l) => `<button type="button" class="${kind === v ? 'on' : ''}" data-act="txKind" data-v="${v}" aria-pressed="${kind === v}">${l}</button>`;
-  return sheetWrap(t ? '記録を直す' : s.inbox ? 'カード利用を家計簿に記録' : inc ? '収入を記録' : '支出を記録', `<form class="stack" data-form="tx" novalidate>
-    ${s.inbox ? '' : `<div class="seg two-seg" role="group" aria-label="支出か収入か">${kd('expense', '支出')}${kd('income', '収入')}</div>`}
-    ${mine ? field('txScope', '見せる範囲', `<select id="txScope">${inc ? sc('private', '自分だけ(相手には見えません)') + sc('shared', 'ふたりに見せる') : sc('shared', 'ふたりの支出(精算の対象)') + sc('private', '自分だけ(相手には見えません)')}</select>`)
-      : `<p class="muted hint" style="margin:0;font-size:13px">相手が記録した${inc ? '収入' : '支出'}なので、見せる範囲は相手だけが変えられます。</p>`}
-    ${s.inbox ? `<p class="muted" style="margin:0">${esc(s.card || 'カード')}で払った分です。</p>` : ''}
-    ${field('txAmt', '金額(円)', `<input id="txAmt" type="text" inputmode="numeric" maxlength="9" placeholder="例：1280" value="${s.amt || ''}">`)}
-    <fieldset class="chips"><legend>分類</legend>${cats.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === def ? 'checked' : ''}><span>${c}</span></label>`).join('')}</fieldset>
-    ${field('txShop', inc ? '入ってきた先・内容(なくてもよい)' : 'お店・内容(なくてもよい)', `<input id="txShop" type="text" maxlength="40" placeholder="${inc ? '例:会社、証券会社' : '例：スーパー'}" value="${esc(s.shop || '')}">`)}
-    <div class="two">${field('txDate', '日付', `<input id="txDate" type="date" value="${date}">`)}${field('txWho', inc ? '受け取った人' : '払った人', `<select id="txWho">${memberOpts(s.who || st.me.user_id)}</select>`)}</div>
-    ${inc ? '<p class="muted hint" style="margin:0;font-size:13px">収入は、ふたりの支出・精算・予算には入りません。</p>' : ''}
-    <p class="err" id="err" hidden></p>
-    <button class="btn primary" type="submit">${t ? '保存する' : '記録する'}</button>
-    ${s.inbox ? '<button class="btn" type="button" data-act="inboxIgnore">家計簿に記録しない(仕事・アパートの分など)</button>' : ''}${closeBtn('やめる')}</form>`);
-}
-function txSheetHtml() {
-  const { st, esc } = C, s = st.sheet, t = (st.tx || []).find(x => x.id === s.id); if (!t) return '';
-  return sheetWrap(`${esc(t.shop || t.category)} ${isIncome(t) ? '+' : ''}${yen(t.amount)}`, `<p class="muted" style="margin:0">${md(t.date)}・${isIncome(t) ? '収入・' : ''}${t.category}・${esc(C.nameOf(t.paid_by))}が${isIncome(t) ? '受け取った' : '払った'}・${t.scope === 'private' ? '自分だけ' : isIncome(t) ? 'ふたりに見せる' : 'ふたりの支出'}</p>
-    ${!isIncome(t) ? `<button class="btn" data-act="deadlineNew" data-from="tx">${ic('alarm')}保証・契約の期限をやることに登録</button>` : ''}
-    ${t.receipt_path ? (s.photo ? `<img class="rphoto" src="${esc(s.photo)}" alt="レシートの写真">` : `<button class="btn" data-act="photoShow" data-path="${esc(t.receipt_path)}">${ic('receipt')}レシートの写真を見る</button>`) : ''}
-    ${t.items?.length ? `<div class="items">${t.items.map(x => `<div class="irow ro"><span>${esc(x.name)}</span><span>${yen(x.price)}</span></div>`).join('')}</div>` : ''}
-    <button class="btn" data-act="txEdit">内容を直す</button>
-    ${t.fixed_cost_id ? '<p class="muted" style="margin:0">固定費から自動で記録したものです。この月の分は「内容を直す」で直せます。毎月の金額や記録の停止は「固定費」で変えてください。</p>'
-      : s.confirm ? '<button class="btn danger" data-act="txDelYes">本当に削除する(7日間はゴミ箱から戻せます)</button>' : '<button class="btn danger" data-act="txDel">この記録を削除</button>'}${closeBtn()}`);
-}
-// 固定費の入力欄(追加と修正で共通。p は id の頭文字)
-function fxFields(p, f) {
-  const { st, esc } = C, me = st.me.user_id, mine = !f || f.owner === me;
-  const o = (v, cur, l) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
-  return `<div class="two">${field(p + 'Name', '名前', `<input id="${p}Name" type="text" maxlength="30" placeholder="例：家賃" value="${esc(f?.name || '')}">`)}${field(p + 'Amt', '金額(円)', `<input id="${p}Amt" type="text" inputmode="numeric" maxlength="9" placeholder="例：73000" value="${f?.amount || ''}">`)}</div>
-    <div class="two">${field(p + 'Cat', '分類', `<select id="${p}Cat">${CATS.map(c => o(c, f?.category, c)).join('')}</select>`)}${field(p + 'Who', '払う人', `<select id="${p}Who">${memberOpts(f?.paid_by || me)}</select>`)}</div>
-    ${field(p + 'Cyc', '払い方', `<select id="${p}Cyc" data-cyc="${p}">${o('monthly', f?.cycle || 'monthly', '毎月払う(金額は1か月分)')}${o('yearly', f?.cycle || 'monthly', '年に1回払う(金額は1年分)')}</select>`)}
-    <div class="two">${field(p + 'Mon', '支払月', `<select id="${p}Mon" ${isYearly(f || {}) ? '' : 'disabled'}>${Array.from({ length: 12 }, (_, i) => o(String(i + 1), String(f?.pay_month || Number(today().slice(5, 7))), `${i + 1}月`)).join('')}</select>`)}${field(p + 'Day', '支払日', `<select id="${p}Day">${Array.from({ length: 31 }, (_, i) => o(String(i + 1), String(f?.pay_day || 1), i === 30 ? '末日' : `${i + 1}日`)).join('')}</select>`)}</div>
-    ${field(p + 'Rec', '家計簿への記録', `<select id="${p}Rec">${o('on', f && !f.active ? 'off' : 'on', '支払日に自動で記録する')}${o('off', f && !f.active ? 'off' : 'on', '記録しない(金額を把握するだけ)')}</select>`)}
-    ${mine ? field(p + 'Scope', '見せる範囲', `<select id="${p}Scope">${o('shared', f?.scope || 'shared', 'ふたりに見せる')}${o('private', f?.scope || 'shared', '自分だけ(相手には見えません)')}</select>`)
-      : '<p class="muted hint" style="margin:0;font-size:13px">相手が登録した固定費なので、見せる範囲は相手だけが変えられます。</p>'}`;
-}
-function kbFixed() {
-  const { st, esc } = C, fx = st.fixed || [], sum = a => a.reduce((x, f) => x + f.amount, 0);
-  const rec = fx.filter(f => f.active), info = fx.filter(f => !f.active), mt = st.fixMatched || [];
-  const sumM = a => a.reduce((x, f) => x + perMonth(f), 0), sumY = a => a.reduce((x, f) => x + perYear(f), 0);
-  const row = f => `<button class="row" data-act="fixOpen" data-id="${f.id}" ${edge(f.paid_by)}><span class="main"><span class="name">${esc(f.name)}</span>
-    <span class="sub">${cycText(f)}・${f.category}・${who(f.paid_by)}が払う${f.scope === 'private' ? '・自分だけ' : ''}</span></span><span class="amt"><b>${yen(f.amount)}${isYearly(f) ? '<small>/年</small>' : ''}</b><small>${isYearly(f) ? `月あたり ${yen(perMonth(f))}` : `年 ${yen(perYear(f))}`}</small></span></button>`;
-  const group = (title, list, empty) => `<h3 class="sub-title">${title}(${list.length}件・月あたり${yen(sumM(list))})</h3>
-    ${list.length ? list.map(row).join('') : `<p class="muted hint" style="margin:0 0 8px;font-size:13px">${empty}</p>`}`;
-  const fname = id => fx.find(f => f.id === id)?.name || '(削除した固定費)';
-  const now = st.kb.month === thisMonth(), done = new Set((st.tx || []).filter(t => t.fixed_cost_id).map(t => t.fixed_cost_id));
-  const soon = now ? rec.filter(f => !done.has(f.id) && payThisMonth(f, thisMonth()) && payDate(thisMonth(), f.pay_day) > today()).sort((a, b) => (a.pay_day || 1) - (b.pay_day || 1)) : [];
-  // 1年あたりで多い順(サブスクや保険の見直し用)
-  const top = [...fx].sort((a, b) => perYear(b) - perYear(a)), maxY = Math.max(1, ...top.map(perYear));
-  return `<section class="card"><div class="sum"><div><small>固定費 月あたり</small><b>${yen(sumM(fx))}</b></div><div><small>1年あたり</small><b>${yen(sumY(fx))}</b></div></div>
-    <p class="muted hint" style="margin:6px 0 0;font-size:12.5px">年払いのものは12で割って月あたりに入れています。家計簿に記録するのは${yen(sumM(rec))}/月分です。</p></section>
-  ${soon.length ? `<section class="card list"><h2 class="group-title">今月これから払う固定費(${soon.length}件・${yen(sum(soon))})</h2>
-    ${soon.map(f => `<div class="row" ${edge(f.paid_by)}><span class="main"><span class="name">${esc(f.name)}</span><span class="sub">${md(payDate(thisMonth(), f.pay_day))}に記録します・${f.category}</span></span><b>${yen(f.amount)}</b></div>`).join('')}</section>` : ''}
-  ${fx.length ? `<section class="card list"><h2 class="group-title">1年あたりで多い順(見直しの目安)</h2>
-    ${top.slice(0, 8).map(f => `<div class="yrow"><span class="yname">${esc(f.name)}</span><span class="ybar"><i style="width:${Math.max(2, Math.round(perYear(f) / maxY * 100))}%"></i></span><b>${yen(perYear(f))}</b></div>`).join('')}
-    <p class="muted hint" style="margin:8px 0 0;font-size:13px">サブスクや保険は、1年分にすると大きさが分かります。使っていないものがあれば、解約や安いプランを考えるきっかけにしてください。</p></section>` : ''}
-  <section class="card list">${group('支払日に自動で記録', rec, '家賃・保険など、口座から払うものがおすすめです')}
-    ${group('記録しない(把握だけ)', info, '金額を知っておきたいだけのものを入れます')}
-    <p class="muted hint" style="margin:6px 0 0;font-size:13px">押すと、名前・金額・記録するかどうか・見せる範囲を直せます。</p></section>
-  ${mt.length ? `<section class="card list"><h2 class="group-title">固定費で記録済みと判断したカード利用(${mt.length})</h2>
-    <p class="muted hint" style="margin:0 0 4px;font-size:13px">固定費と同じ金額だったので、二重にならないよう確認待ちから外しました。違っていたら「取り消す」を押すと確認待ちに戻ります。</p>
-    ${mt.map(i => `<div class="row"><span class="main"><span class="name">${esc(i.merchant || '(お店の名前なし)')} ${yen(i.amount)}</span>
-      <span class="sub">${md(ymd(new Date(i.used_at)))}・${esc(i.card || 'カード')} → 固定費「${esc(fname(i.fixed_cost_id))}」</span></span>
-      <button class="pill" data-act="fixUnmatch" data-id="${i.id}">取り消す</button></div>`).join('')}</section>` : ''}
-  <form class="card stack" data-form="fix" novalidate><h2>固定費を追加</h2>${fxFields('fx')}
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">追加する</button>
-    <p class="muted hint" style="margin:0;font-size:13px">カードで払う固定費も「記録する」で大丈夫です。同じ金額のカード利用が取り込まれたら、自動で見分けて二重に数えません。</p></form>`;
-}
-// 期限の登録:保証が切れる日・契約の更新日を、何日前かに「やること」として出す
-const DL_KINDS = [['warranty', '保証が切れる', '保証'], ['renew', '契約の更新・見直し', '更新'], ['other', 'そのほかの期限', '期限']];
-const addYears = (d, n) => { const x = dt(d); x.setFullYear(x.getFullYear() + n); return ymd(x); };
-// 真ん中の「＋」:どの画面からでも追加
-function quickHtml() {
-  const t = (to, k, l) => `<button class="qtile" data-act="quickGo" data-to="${to}">${ic(k)}<span>${l}</span></button>`;
-  const f = (id, k, l, multi) => `<label class="qtile">${ic(k)}<span>${l}</span><input id="${id}" type="file" accept="image/*" ${multi ? 'multiple' : ''} hidden></label>`;
-  return sheetWrap('追加する', `<div class="qgrid">${t('ev', 'cal', '予定')}${t('todo', 'todo', 'やること')}${t('shop', 'cart', '買い物')}${t('tx', 'wallet', '支出')}${t('inc', 'income', '収入')}${f('rcptFile', 'camera', 'レシートを撮る', true)}${f('paperFile', 'doc', '紙のお知らせ')}</div>${closeBtn()}`);
-}
-function deadlineHtml() {
-  const { esc } = C, s = C.st.sheet, o = (v, cur, l) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
-  return sheetWrap('期限をやることに登録', `<form class="stack" data-form="deadline" novalidate>
-    ${field('dlKind', '何の期限', `<select id="dlKind">${DL_KINDS.map(([v, l]) => o(v, s.kind, l)).join('')}</select>`)}
-    ${field('dlName', '名前', `<input id="dlName" type="text" maxlength="30" value="${esc(s.name || '')}" placeholder="例:冷蔵庫、スマホの保険">`)}
-    <div class="two">${field('dlDate', '期限日', `<input id="dlDate" type="date" value="${s.date}">`)}${field('dlBefore', '知らせる日', `<select id="dlBefore">${[[30, '30日前'], [14, '14日前'], [7, '7日前'], [0, '当日']].map(([v, l]) => o(String(v), '30', l)).join('')}</select>`)}</div>
-    ${field('dlScope', '見せる範囲', `<select id="dlScope">${o('shared', s.scope, 'ふたりに見せる')}${o('private', s.scope, '自分だけ(相手には見えません)')}</select>`)}
-    <p class="muted hint" style="margin:0;font-size:13px">「知らせる日」に、やることの「今日やること」に出て、朝7時の通知にも入ります。保証は、家電なら1年(メーカー保証)のことが多いので、保証書で確かめてください。</p>
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">やることに登録</button>${closeBtn('やめる')}</form>`);
-}
-function fixSheetHtml() {
-  const { st, esc } = C, s = st.sheet, f = (st.fixed || []).find(x => x.id === s.id); if (!f) return '';
-  return sheetWrap(`固定費「${esc(f.name)}」を直す`, `<form class="stack" data-form="fixEdit" novalidate>${fxFields('fe', f)}
-    <p class="muted hint" style="margin:0;font-size:13px">見せる範囲を変えると、これまでにこの固定費から記録した分も同じ範囲に変わります。</p>
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">保存する</button></form>
-    <button class="btn" data-act="deadlineNew" data-from="fix">${ic('alarm')}契約の更新日をやることに登録</button>
-    <button class="btn danger" data-act="fixDel" data-id="${f.id}">この固定費を削除</button>${closeBtn()}`);
-}
-function kbBudget() {
-  const { st } = C;
-  return `<form class="card stack" data-form="budget" novalidate><h2>1か月の予算(ふたりの支出)</h2>
-    ${CATS.map((c, i) => `<div class="brow"><label for="bg${i}">${c}</label><input id="bg${i}" type="text" inputmode="numeric" maxlength="9" placeholder="なし" value="${(st.budgets.find(b => b.category === c) || {}).amount || ''}"></div>`).join('')}
-    <button class="btn primary" type="submit">保存する</button><p class="muted hint" style="margin:0;font-size:13px">空にすると、その分類の予算はなしになります。</p></form>`;
-}
-function kbGoals() {
-  const { st, esc } = C;
-  return `<section class="card list"><h2 class="group-title">目標貯金</h2>
-    ${st.goals.length ? st.goals.map(g => `<div class="goal"><div class="row" style="border:0"><span class="main"><span class="name">${esc(g.name)}</span><span class="sub">${yen(g.saved)} / ${yen(g.target)}(${Math.floor(g.saved / g.target * 100)}%)</span></span>
-      <button class="pill go" data-act="goalAdd" data-id="${g.id}">入金</button><button class="pill" data-act="goalDel" data-id="${g.id}" aria-label="${esc(g.name)}を削除">削除</button></div>
-      <i class="gbar"><b style="width:${Math.min(100, g.saved / g.target * 100)}%"></b></i></div>`).join('') : '<p class="muted" style="margin:0 0 10px">旅行や家電など、ふたりで貯める目標を登録できます</p>'}</section>
-  <form class="card stack" data-form="goal" novalidate><h2>目標を追加</h2>
-    <div class="two">${field('glName', '名前', '<input id="glName" type="text" maxlength="30" placeholder="例：旅行">')}${field('glTarget', '目標額(円)', '<input id="glTarget" type="text" inputmode="numeric" maxlength="9" placeholder="例：100000">')}</div>
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">追加する</button></form>`;
-}
-function goalAddHtml() {
-  const g = C.st.goals.find(x => x.id === C.st.sheet.id); if (!g) return '';
-  return sheetWrap(`${C.esc(g.name)}に入金`, `<form class="stack" data-form="goalAdd" novalidate>
-    ${field('gaAmt', '金額(円)。引き出すときは先頭に「-」', '<input id="gaAmt" type="text" inputmode="numeric" maxlength="10" placeholder="例：5000">')}
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">記録する</button>${closeBtn('やめる')}</form>`);
-}
-function bulkHtml() {
-  const ib = C.st.inbox || [], total = ib.reduce((a, i) => a + i.amount, 0);
-  return sheetWrap(`${ib.length}件をまとめて記録`, `<form class="stack" data-form="bulk" novalidate>
-    <p class="muted" style="margin:0">それぞれ、一覧の「推測」の分類で家計簿に入ります(合計 ${yen(total)})。違う分類のものや、仕事・アパートの分が混ざっていたら、先にそれだけ1件ずつ直してから使ってください。</p>
-    ${field('bkScope', '共有', '<select id="bkScope"><option value="private">自分だけ(相手には見えません)</option><option value="shared">ふたりの支出(精算の対象)</option></select>')}
-    <button class="btn primary" type="submit">まとめて記録する</button>${closeBtn('やめる')}</form>`);
-}
-function confirmHtml() {
-  const s = C.st.sheet;
-  return sheetWrap(s.title, `<p class="muted" style="margin:0">${s.note || '消したものは7日間、「設定 → ゴミ箱」から戻せます。'}</p>
-    <button class="btn danger" data-act="${s.yes}" data-id="${s.id}">削除する</button>${closeBtn('やめる')}`);
-}
-function csv() {
-  const { st } = C, rows = [['日付', '金額', 'お店・内容', '分類', '払った人', '共有', '固定費']];
-  [...st.tx].reverse().forEach(t => rows.push([t.date, isIncome(t) ? t.amount : -t.amount, t.shop || '', t.category, C.nameOf(t.paid_by), t.scope === 'shared' ? 'ふたり' : '自分だけ', t.fixed_cost_id ? '○' : '', isIncome(t) ? '収入' : '支出']));
-  const text = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-  const file = new File([text], `家計簿_${st.kb.month}.csv`, { type: 'text/csv' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
-}
-
-// ---------- レシート ----------
-const catsOf = i => [...new Set((i.items || []).map(x => x.category))];
-// 品目を分類ごとにまとめる。品目の合計と支払額の差(税・値引きの読み違いなど)は、いちばん大きい分類に入れる
-export function splitByCategory(items, total) {
-  const g = {};
-  items.forEach(x => { (g[x.category] ||= { amount: 0, items: [] }); g[x.category].amount += x.price; g[x.category].items.push(x); });
-  const keys = Object.keys(g); if (!keys.length) return [];
-  const diff = total - keys.reduce((a, k) => a + g[k].amount, 0);
-  if (diff) { const big = keys.sort((a, b) => g[b].amount - g[a].amount)[0]; g[big].amount += diff; g[big].items.push({ name: '調整(税・値引きなど)', price: diff, category: big }); }
-  return Object.entries(g).filter(([, v]) => v.amount > 0).map(([category, v]) => ({ category, amount: v.amount, items: v.items }));
-}
-async function shrink(file) {   // 写真を長い辺1600pxのJPEGにして、送る量を減らす
-  const img = await createImageBitmap(file);
-  const k = Math.min(1, 1600 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
-  cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
-  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-  return cv.toDataURL('image/jpeg', 0.8).split(',')[1];
-}
-// レシートの写真を保存する(自分のフォルダへ)。失敗しても読み取りは続ける
-async function savePhoto(b64) {
-  try {
-    const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), path = `${C.st.me.user_id}/${crypto.randomUUID()}.jpg`;
-    const { error } = await sb().storage.from('receipts').upload(path, new Blob([bin], { type: 'image/jpeg' }), { contentType: 'image/jpeg', upsert: false });
-    return error ? null : path;
-  } catch { return null; }
-}
-// ---------- 消耗品の買い時 ----------
-// 買い物リストに入れた日(最近8回)の間隔から「そろそろ買う頃」を見当付ける
-export const pushDate = (arr, d) => { const a = [...(arr || [])]; if (a.at(-1) !== d) a.push(d); return a.slice(-8); };
-export function soonItems(names, items, t = today()) {
-  const inList = new Set((items || []).filter(i => !i.done).map(i => i.name)), day = d => Date.parse(d + 'T00:00:00Z') / 864e5;
-  const out = [];
-  for (const r of names || []) {
-    const ds = [...new Set(r.added_dates || [])].sort(); if (r.hidden || inList.has(r.name) || ds.length < 3) continue;
-    const gaps = ds.slice(1).map((d, i) => day(d) - day(ds[i])).sort((a, b) => a - b), every = gaps[Math.floor(gaps.length / 2)];   // 間隔の真ん中の値
-    if (every < 3 || every > 120) continue;
-    const since = day(t) - day(ds.at(-1));
-    if (since >= every) out.push({ name: r.name, every, since });
-  }
-  return out.sort((a, b) => b.since / b.every - a.since / a.every).slice(0, 6);
-}
-export function soonHtml(names, items) {
-  const list = soonItems(names, items); if (!list.length) return '';
-  return `<section class="card soon"><h2 class="group-title">そろそろ買う頃かもしれません</h2>
-    <div class="sugg soonchips">${list.map(x => `<button type="button" data-act="quick" data-name="${C.esc(x.name)}">${ic('plus')}${C.esc(x.name)}<small>だいたい${x.every}日ごと・前回${x.since}日前</small></button>`).join('')}</div>
-    <p class="muted hint" style="margin:4px 0 0;font-size:12.5px">これまでリストに入れた間隔からの見当です。押すとリストに入ります。</p></section>`;
-}
-// レシートの品目と同じ買い物リストの品物に、チェックを付ける(ひらがな・カタカナは同じとみなす)
-const kana = x => String(x || '').normalize('NFKC').toLowerCase().replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s/g, '');
-export function boughtItems(items, names) {
-  const ns = (names || []).map(kana).filter(Boolean);
-  return (items || []).filter(i => !i.done && kana(i.name) && ns.some(n => n.includes(kana(i.name)) || (n.length >= 2 && kana(i.name).includes(n))));
-}
-async function checkShopping(names) {
-  const st = C.st, hit = boughtItems(st.items, names);
-  for (const i of hit) { i.done = true; i.done_by = st.me.user_id; await C.send('shopping_items', 'update', { done: true, done_by: st.me.user_id }, { id: i.id }); }
-  return hit.map(i => i.name);
-}
-// 紙のお知らせ・予約票から予定とやることの候補を読み取る(登録は、確かめてから)
-async function readPaper(file) {
-  if (!file) return;
-  C.toast('紙を読み取り中…(10秒ほどかかります)');
-  try {
-    const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: await shrink(file), mime: 'image/jpeg', mode: 'paper' } });
-    const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || error?.message;
-    if (msg) throw new Error(msg);
-    if (!data?.paper?.items?.length) throw new Error('予定ややることを読み取れませんでした。受け取り係(receipt-read)が新しい版か確かめてください');
-    C.st.sheet = { type: 'paper', form: true, title: data.paper.title, items: data.paper.items };
-  } catch (e) { C.st.sheet = { type: 'info', title: '読み取れませんでした', lines: [e.message] }; }
-  C.render();
-}
-function paperHtml() {
-  const { esc } = C, s = C.st.sheet, o = (v, cur, l) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
-  return sheetWrap(s.title ? `「${esc(s.title)}」から` : '紙から読み取った候補', `<form class="stack" data-form="paper" novalidate>
-    <p class="muted hint" style="margin:0;font-size:13px">読み取った候補です。日付と名前を確かめ、登録するものに印を付けてください。</p>
-    <div class="list">${s.items.map((x, n) => `<div class="prow" data-end="${esc(x.end_time || '')}" data-note="${esc(x.note || '')}">
-      <label class="pcheck"><input type="checkbox" class="pon" checked aria-label="${esc(x.title)}を登録する"></label>
-      <div class="pfields"><div class="two"><select class="ptype" aria-label="種類">${o('event', x.type, '予定')}${o('todo', x.type, 'やること')}</select><input type="date" class="pdate" value="${x.date}" aria-label="日付"></div>
-        <input type="text" class="ptitle" maxlength="60" value="${esc(x.title)}" aria-label="名前">
-        <input type="time" class="ptime" value="${x.time || ''}" aria-label="時刻(予定のとき)">
-        ${x.note ? `<span class="muted" style="font-size:12.5px">メモ:${esc(x.note)}</span>` : ''}</div></div>`).join('')}</div>
-    ${field('ppScope', '見せる範囲', `<select id="ppScope">${o('shared', 'shared', 'ふたりに見せる')}${o('private', '', '自分だけ(相手には見えません)')}</select>`)}
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">印を付けたものを登録</button>${closeBtn('やめる')}</form>`);
-}
-async function readReceipts(files) {
-  if (!files.length) return;
-  let ok = 0, merged = 0; const errs = [], bought = [];
-  for (const [n, f] of files.entries()) {
-    toast(`レシート ${n + 1}/${files.length} を読み取り中…`);
-    try {
-      const img = await shrink(f), path = await savePhoto(img);
-      const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: img, mime: 'image/jpeg' } });
-      const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || error?.message;
-      if (msg) throw new Error(msg);
-      if (path && data?.id) await sb().from('card_inbox').update({ receipt_path: path }).eq('id', data.id);   // 写真を確認待ちに結び付ける
-      bought.push(...await checkShopping((data?.receipt?.items || []).map(x => x.name)));
-      ok++; if (data.merged) merged++;
-    } catch (e) { errs.push(`${n + 1}枚目:${e.message}`); }
-  }
-  await reloadInbox(); C.render();
-  toast(`${ok}枚を読み取りました${merged ? `(${merged}枚はカード利用とまとめました)` : ''}${bought.length ? `。買い物リストの「${bought.slice(0, 3).join('・')}」${bought.length > 3 ? `ほか${bought.length - 3}件` : ''}にチェックを付けました` : ''}${errs.length ? `。読めなかったもの ${errs.length}枚` : ''}`);
-  if (errs.length) setTimeout(() => alertBox(errs), 2300);
-}
-function alertBox(errs) { C.st.sheet = { type: 'info', title: '読み取れなかったレシート', lines: errs }; C.render(); }
-const infoHtml = () => sheetWrap(C.st.sheet.title, `<p class="muted" style="margin:0">${C.st.sheet.lines.map(C.esc).join('<br>')}</p>
-  <p class="muted hint" style="margin:0;font-size:13px">明るい場所で、レシート全体が入るように撮り直すと読めることがあります。</p>${closeBtn()}`);
-function rcptHtml() {
-  const { st, esc } = C, i = (st.inbox || []).find(x => x.id === st.sheet.id); if (!i) return '';
-  const sum = i.items.reduce((a, x) => a + x.price, 0);
-  return sheetWrap(`${esc(i.merchant)} ${yen(i.amount)}`, `<form class="stack" data-form="rcpt" novalidate>
-    ${field('rcScope', '見せる範囲', '<select id="rcScope"><option value="shared">ふたりの支出(精算の対象)</option><option value="private">自分だけ(相手には見えません)</option></select>')}
-    <p class="muted" style="margin:0">${md(inboxDate(i))}・${esc(i.card)}${i.note ? `<br><span style="color:var(--red)">${esc(i.note)}</span>` : ''}</p>
-    ${i.receipt_path ? (st.sheet.photo ? `<img class="rphoto" src="${esc(st.sheet.photo)}" alt="レシートの写真">` : `<button type="button" class="btn" data-act="photoShow" data-path="${esc(i.receipt_path)}">${ic('receipt')}写真を見る(品目と見比べる)</button>`) : ''}
-    <div class="items">${i.items.map((x, n) => `<div class="irow" data-i="${n}">
-      <input type="text" class="iname" maxlength="40" value="${esc(x.name)}" aria-label="品名">
-      <input type="text" class="iprice" inputmode="numeric" value="${x.price}" aria-label="金額">
-      <select class="icat" aria-label="分類">${CATS.map(c => `<option ${c === x.category ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`).join('')}</div>
-    <p class="muted hint" style="margin:0;font-size:13px">品目の合計 ${yen(sum)}${sum !== i.amount ? `(支払額との差 ${yen(i.amount - sum)} は、いちばん大きい分類に「調整」として入れます)` : ''}</p>
-    ${field('rcWho', '払った人', `<select id="rcWho">${memberOpts(st.me.user_id)}</select>`)}
-    <p class="err" id="err" hidden></p>
-    <button class="btn primary" type="submit">分類ごとに分けて記録する</button>
-    <button class="btn" type="button" data-act="inboxIgnore">家計簿に記録しない(仕事・アパートの分など)</button>${closeBtn('やめる')}</form>`);
 }
 
 // ---------- シート(下から出る画面) ----------
@@ -1085,6 +476,10 @@ export async function onClick(act, el) {
     case 'txNewIncome': openSheet({ type: 'txNew', kind: 'income' }); return true;
     case 'missRec': { const m = (st.misses || []).find(x => x.id === id); if (!m) return true;
       openSheet({ type: 'txNew', miss: m.id, shop: m.merchant || '', date: ymd(new Date(m.used_at)) }); return true; }
+    case 'welcomeDone': ls('kurashi.welcome', '1'); C.render(); return true;
+    case 'welcomeAgain': ls('kurashi.welcome', null); location.hash = '#home'; return true;
+    case 'textSet': try { localStorage.setItem('kurashi.text', el.dataset.v); } catch {} applyTheme(); C.render(); return true;
+    case 'statusRun': st.status = { loading: true }; C.render(); await runStatus(); C.render(); return true;
     case 'missDel': await sb().from('card_misses').delete().eq('id', id); st.misses = (st.misses || []).filter(m => m.id !== id); C.render(); return true;
     case 'deadlineNew': {
       const src = el.dataset.from === 'tx' ? (st.tx || []).find(x => x.id === st.sheet.id) : (st.fixed || []).find(x => x.id === st.sheet.id); if (!src) return true;
@@ -1158,176 +553,4 @@ export async function onClick(act, el) {
     case 'goalDelYes': await run(sb().from('goals').update({ deleted_at: new Date().toISOString() }).eq('id', id), 'ゴミ箱に移しました(7日間は「設定 → ゴミ箱」から戻せます)'); st.sheet = null; await loadFeatures(); C.render(); return true;
   }
   return false;
-}
-
-// ---------- 設定:カード利用の取り込み(iPhoneのショートカット) ----------
-export function calSettingsHtml() {
-  const ws = weekStart(), b = (v, l) => `<button class="pill${ws === v ? ' on' : ''}" data-act="calWeek" data-v="${v}" aria-pressed="${ws === v}">${l}</button>`;
-  return `<section class="card stack"><h2>カレンダーの週の始まり</h2><div class="nav">${b(0, '日曜始まり')}${b(1, '月曜始まり')}</div>
-    <p class="muted hint" style="margin:0;font-size:13px">この端末だけの設定です。相手の画面は変わりません。</p></section>`;
-}
-// ---------- 設定:通知 ----------
-const NOTIFY = [['partner', '相手が予定・買い物・やること・家計簿を追加・変更したとき'], ['urgent', '買い物に「急ぎ」が付いたとき'],
-  ['todo', 'やることの期限(朝7時に今日やることをまとめて)'], ['events', '予定(前日20時に明日の分、朝7時に今日の分)'],
-  ['remind', '予定ごとのお知らせ(予定で選んだ「30分前」などの時刻)'], ['budget', '予算の8割を使ったとき・超えたとき'], ['card', 'カード利用の確認待ちがあるとき(20時)'], ['monthly', '毎月1日の朝に、先月のふり返り(支出の合計・前の月との比べ)'], ['forgot', '夜8時に、その日の支出をまだ記録していないとき(つけ忘れ防止)']];
-const b64uBytes = s => { const t = s.replace(/-/g, '+').replace(/_/g, '/'); return Uint8Array.from(atob(t + '='.repeat((4 - t.length % 4) % 4)), c => c.charCodeAt(0)); };
-async function loadPush() {
-  const p = { supported: 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
-    standalone: !!(window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone) };
-  p.perm = p.supported ? Notification.permission : 'unsupported';
-  try { const reg = p.supported && await navigator.serviceWorker.getRegistration(); p.subscribed = !!(reg && await reg.pushManager.getSubscription()); } catch { p.subscribed = false; }
-  const { data } = await sb().from('notify_prefs').select('*').eq('user_id', C.st.me.user_id).maybeSingle();
-  p.prefs = Object.fromEntries(NOTIFY.map(([k]) => [k, data ? data[k] !== false : true]));
-  C.st.push = p;
-}
-async function pushOn() {
-  const { st, run } = C;
-  if (!st.push?.supported) return C.toast('この端末では通知を使えません');
-  const perm = await Notification.requestPermission();   // 押した直後に聞く(iPhoneの決まり)
-  if (perm !== 'granted') { st.push.perm = perm; C.render(); return C.toast('通知が許可されませんでした'); }
-  const { data, error } = await sb().functions.invoke('push', { body: { action: 'key' } });
-  if (error || !data?.key) return C.toast('通知の準備ができませんでした。Supabaseに「push」が置かれているか確かめてください');
-  const reg = await navigator.serviceWorker.ready;
-  const old = await reg.pushManager.getSubscription(); if (old) await old.unsubscribe();
-  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(data.key) });
-  const j = sub.toJSON();
-  await run(sb().from('push_subs').upsert({ user_id: st.me.user_id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, ua: navigator.userAgent.slice(0, 120) }, { onConflict: 'endpoint' }),
-    'この端末で通知を受け取ります');
-  await loadPush(); C.render();
-}
-async function pushOff() {
-  try {
-    const reg = await navigator.serviceWorker.getRegistration(), sub = reg && await reg.pushManager.getSubscription();
-    if (sub) { await C.run(sb().from('push_subs').delete().eq('endpoint', sub.endpoint)); await sub.unsubscribe(); }
-  } catch { /* 止められなくても画面は進める */ }
-  C.toast('この端末の通知を止めました'); await loadPush(); C.render();
-}
-export function notifySettingsHtml() {
-  const { st } = C, p = st.push;
-  if (!p) { C.st.push = { loading: true }; loadPush().then(() => C.render()).catch(() => {}); }
-  if (!p || p.loading) return '<section class="card stack"><h2>通知</h2><p class="muted" style="margin:0">確かめています…</p></section>';
-  const head = !p.supported || !p.standalone
-    ? '<p class="muted hint" style="margin:0;font-size:13px">通知は、ホーム画面に追加した暮らし帳から開いたときに使えます(iPhoneは iOS 16.4 以降)。Safariで開いている場合は、共有ボタン →「ホーム画面に追加」から開き直してください。</p>'
-    : p.perm === 'denied' ? '<p class="muted hint" style="margin:0;font-size:13px">通知が「許可しない」になっています。iPhoneの「設定」→「通知」→「暮らし帳」で許可してから、もう一度押してください。</p>' : '';
-  const sw = (k, l) => `<label class="switch"><input type="checkbox" data-act="notifyPref" data-k="${k}" ${p.prefs[k] ? 'checked' : ''}><span>${l}</span></label>`;
-  return `<section class="card stack"><h2>通知</h2>${head}
-    ${p.supported && p.standalone ? (p.subscribed
-      ? `<p style="margin:0;display:flex;gap:6px;align-items:center">${ic('bell')}この端末で通知を受け取っています</p><div class="two"><button class="btn" data-act="pushTest">テスト通知を送る</button><button class="btn" data-act="pushOff">この端末の通知を止める</button></div>`
-      : '<button class="btn primary" data-act="pushOn">この端末で通知を受け取る</button>') : ''}
-    <fieldset class="stack" style="border:0;padding:0;margin:0"><legend class="muted" style="font-size:13px;margin-bottom:4px">受け取る通知(人ごとの設定です。相手には影響しません)</legend>${NOTIFY.map(([k, l]) => sw(k, l)).join('')}</fieldset>
-    <p class="muted hint" style="margin:0;font-size:13px">「自分だけ」の予定・やることは、通知では名前を伏せて「自分だけの予定」と出します。</p></section>`;
-}
-
-// ---------- 検索(予定・家計簿・やること・買い物・固定費をまとめて) ----------
-const like = q => '%' + q.replace(/[%_,()\\]/g, ' ').trim() + '%';
-const has = (v, q) => String(v || '').toLowerCase().includes(q.toLowerCase());
-async function doSearch(q) {
-  const { st } = C;
-  if (!q) { st.search = { q: '', res: null }; return; }
-  st.search = { q, res: 'loading' };
-  let res;
-  const local = () => ({ ev: (st.events || []).filter(e => has(e.title, q)), tx: (st.tx || []).filter(t => has(t.shop, q) || has(t.category, q)),
-    ch: (st.chores || []).filter(c => has(c.name, q)), sh: (st.items || []).filter(i => has(i.name, q)), fx: (st.fixed || []).filter(f => has(f.name, q)), local: true });
-  if (st.offline || navigator.onLine === false) res = local();   // 圏外:端末に残っている分から探す
-  else {
-    const L = like(q);
-    const [ev, tx, ch, sh, fx] = await Promise.all([
-      sb().from('events').select('*').eq('household_id', h()).is('deleted_at', null).ilike('title', L).order('date', { ascending: false }).limit(30),
-      sb().from('transactions').select('*').eq('household_id', h()).is('deleted_at', null).or(`shop.ilike.${L},category.ilike.${L}`).order('date', { ascending: false }).limit(50),
-      sb().from('chores').select('*').eq('household_id', h()).is('deleted_at', null).ilike('name', L).limit(30),
-      sb().from('shopping_items').select('*').eq('household_id', h()).ilike('name', L).limit(30),
-      sb().from('fixed_costs').select('*').eq('household_id', h()).is('deleted_at', null).ilike('name', L).limit(30)]);
-    res = [ev, tx, ch, sh, fx].some(x => x.error) ? local() : { ev: ev.data || [], tx: tx.data || [], ch: ch.data || [], sh: sh.data || [], fx: fx.data || [] };
-  }
-  if (st.search?.q === q) st.search.res = res;
-}
-export function viewSearch() {
-  const { st, esc } = C, sr = st.search || { q: '', res: null }, r = sr.res;
-  const row = (act, attrs, name, sub, right = '') => `<button class="row" data-act="${act}" ${attrs}><span class="main"><span class="name">${name}</span><span class="sub">${sub}</span></span>${right}</button>`;
-  const sec = (title, items) => items.length ? `<section class="card list"><h2 class="group-title">${title}(${items.length})</h2>${items.join('')}</section>` : '';
-  let body = '';
-  if (r === 'loading') body = '<p class="muted">探しています…</p>';
-  else if (r) {
-    const txSum = r.tx.filter(t => !isIncome(t)).reduce((a, t) => a + t.amount, 0), inSum = r.tx.filter(isIncome).reduce((a, t) => a + t.amount, 0);
-    body = sec('予定', r.ev.map(e => row('goEv', `data-id="${e.id}" data-d="${e.date}" ${edge(e.for_user)}`, esc(e.title), `${e.date.slice(0, 4)}/${md(e.date)}・${timeText(e)}${e.repeat_rule ? '・' + repText(e.repeat_rule) : ''}・${who(e.for_user)}`)))
-      + (r.tx.length ? `<p class="muted hint" style="margin:0;font-size:13px">家計簿の合計 ${yen(txSum)}${inSum ? `・収入の合計 +${yen(inSum)}` : ''}(${r.tx.length}件)</p>` : '')
-      + sec('家計簿', r.tx.map(t => row('goTx', `data-id="${t.id}" data-d="${t.date}" ${edge(t.paid_by)}`, esc(t.shop || t.category), `${t.date.slice(0, 4)}/${md(t.date)}・${t.category}・${who(t.paid_by)}が払った${t.scope === 'private' ? '・自分だけ' : ''}`, `<b>${yen(t.amount)}</b>`)))
-      + sec('やること', r.ch.map(c => row('goCh', `data-id="${c.id}" ${edge(c.assignee)}`, esc(c.name), `${c.category || '家事'}・${c.archived ? 'お休み中' : freqText(c)}${c.last_done ? '・前回 ' + md(c.last_done) : ''}`)))
-      + sec('買い物', r.sh.map(i => row('goSh', `data-id="${i.id}"`, esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : ''), i.done ? 'カゴに入れた' : 'リストにある')))
-      + sec('固定費', r.fx.map(f => row('goFx', `data-id="${f.id}"`, esc(f.name), `${f.category}・${f.active ? '毎月記録' : '記録しない'}`, `<b>${yen(f.amount)}</b>`)));
-    if (!body.trim()) body = `<p class="muted">「${esc(sr.q)}」は見つかりませんでした</p>`;
-    if (r.local) body = '<p class="muted hint" style="margin:0;font-size:13px">圏外のため、端末に残っている分(家計簿は表示中の月だけ)から探しました。</p>' + body;
-  }
-  return `<main class="screen">
-  <div class="head"><div><small><a href="#home" class="back">${ic('left')}ホーム</a></small><h1>検索</h1></div></div>
-  <form class="addrow" data-form="search" role="search"><label class="sr" for="q">探す言葉</label>
-    <input id="q" type="search" maxlength="40" placeholder="例:車検、美容院、ドミー" value="${esc(sr.q)}" autocomplete="off" enterkeyhint="search"><button class="plus" type="submit" aria-label="探す">${ic('search')}</button></form>
-  <p class="muted hint" style="margin:0;font-size:13px">予定・家計簿(お店・分類)・やること・買い物・固定費から、全部の期間を探します。ゴミ箱の中は探しません。</p>
-  ${body}</main>`;
-}
-
-// ---------- ゴミ箱(消したものを7日間は戻せる) ----------
-const TRASH = [['events', '予定', x => x.title], ['chores', 'やること', x => x.name], ['transactions', '家計簿', x => `${x.shop || x.category} ${yen(x.amount)}`],
-  ['fixed_costs', '固定費', x => `${x.name} ${yen(x.amount)}`], ['goals', '目標貯金', x => x.name]];
-async function loadTrash() {
-  const rs = await Promise.all(TRASH.map(([t]) => sb().from(t).select('*').eq('household_id', h()).not('deleted_at', 'is', null)));
-  C.st.trash = rs.flatMap((r, i) => (r.data || []).map(x => ({ t: TRASH[i][0], label: TRASH[i][1], name: TRASH[i][2](x), id: x.id, at: x.deleted_at })))
-    .sort((a, b) => b.at.localeCompare(a.at));
-}
-export function viewTrash() {
-  const { st, esc } = C;
-  if (!st.trash) { st.trash = 'loading'; loadTrash().then(() => C.render()).catch(() => { st.trash = []; C.render(); }); }
-  const list = Array.isArray(st.trash) ? st.trash : [];
-  const left = at => Math.max(0, 7 - Math.floor((Date.now() - Date.parse(at)) / 864e5));
-  return `<main class="screen">
-  <div class="head"><div><small><a href="#settings" class="back">${ic('left')}設定</a></small><h1>ゴミ箱</h1></div></div>
-  <p class="muted" style="margin:0">消した予定・やること・家計簿・固定費・目標貯金は、7日間ここに残ります。7日を過ぎると自動で消えます。</p>
-  <section class="card list">${st.trash === 'loading' ? '<p class="muted" style="margin:0 0 10px">読み込んでいます…</p>'
-    : list.length ? list.map(x => `<div class="row"><span class="main"><span class="name">${esc(x.name)}</span>
-      <span class="sub"><span class="ctag">${x.label}</span>・${md(ymd(new Date(x.at)))}に削除・あと${left(x.at)}日で消えます</span></span>
-      <button class="pill go" data-act="trashBack" data-t="${x.t}" data-id="${x.id}">戻す</button></div>`).join('')
-    : '<p class="muted" style="margin:0 0 10px">ゴミ箱は空です</p>'}</section></main>`;
-}
-
-// ---------- 設定:PCへのバックアップ ----------
-export function backupSettingsHtml() {
-  const { st, esc } = C, k = st.backupKey;
-  return `<section class="card stack"><h2>PCへのバックアップ</h2>
-    <p class="muted hint" style="margin:0;font-size:13px">自宅PCの「C:\\_Work\\01_ツール\\暮らし帳_バックアップ」が、毎日このアプリのデータを保存します。下の鍵を、そのフォルダの「鍵.txt」に貼ってください。鍵は読むだけで書き換えはできませんが、中身が読めるので人に見せないでください。</p>
-    ${k ? `<div class="codebox">${esc(k)}</div><button class="btn primary" data-act="copy" data-v="${esc(k)}">鍵をコピー</button>
-      <button class="btn" data-act="backupKeyRenew">鍵を作り直す(古い鍵は使えなくなります)</button>`
-      : '<button class="btn" data-act="backupKey">鍵を表示</button>'}</section>`;
-}
-
-// ---------- 設定:ホーム画面のウィジェット(Scriptable) ----------
-export function widgetSettingsHtml() {
-  const { st } = C, ready = st.widgetKey && st.widgetSrc;
-  return `<section class="card stack"><h2>ホーム画面のウィジェット</h2>
-    <p class="muted hint" style="margin:0;font-size:13px">予定と買い物リストを、iPhoneのホーム画面やロック画面に出します。無料アプリ「Scriptable」を使います。ウィジェット用の鍵は「読むだけ」で、これでは何も書き換えられません。</p>
-    ${ready ? `<button class="btn primary" data-act="widgetCopy">スクリプトをコピー(鍵入り)</button>
-      <ol class="steps"><li>App Storeで「Scriptable」を入れて開く</li><li>右上の「＋」→ 中身を全部消して貼り付け</li><li>上の題名を「暮らし帳」にして「Done」</li>
-      <li>ホーム画面を長押し →「編集」→「ウィジェットを追加」→ Scriptable → 大きさを選ぶ</li><li>置いたウィジェットを長押し →「ウィジェットを編集」→ Script で「暮らし帳」を選ぶ</li></ol>
-      <p class="muted hint" style="margin:0;font-size:13px">Parameter に「予定」または「買い物」と書くと、片方だけを大きく出します。表示はおよそ15分ごとに新しくなります(間隔はiPhoneが決めます)。</p>
-      <button class="btn" data-act="widgetKeyRenew">鍵を作り直す(古いウィジェットは表示されなくなります)</button>`
-      : '<button class="btn primary" data-act="widgetKey">ウィジェットの準備をする</button>'}</section>`;
-}
-async function loadWidget(renew) {
-  const { st, run } = C;
-  const [k, src] = await Promise.all([
-    run(sb().rpc('widget_token', { p_renew: !!renew }), renew ? '鍵を作り直しました。スクリプトをコピーし直して、Scriptableに貼り直してください' : null),
-    st.widgetSrc ? st.widgetSrc : fetch('widget.js', { cache: 'no-cache' }).then(r => r.ok ? r.text() : null).catch(() => null)]);
-  if (!src) C.toast('スクリプトを読み込めませんでした。通信を確かめて、もう一度押してください');
-  st.widgetKey = k; st.widgetSrc = src; C.render();
-}
-const widgetScript = () => C.st.widgetSrc.replace('__KEY__', C.st.widgetKey).replace('__URL__', C.url).replace('__APIKEY__', C.key).replace('__WS__', String(weekStart()));
-
-export function cardSettingsHtml() {
-  const { st, esc } = C, k = st.cardKey, url = C.url + '/rest/v1/rpc/card_inbox_add';
-  const box = (label, v) => `<div class="field"><span class="muted" style="font-size:13px">${label}</span><div class="codebox">${esc(v)}</div>
-    <button class="btn text" style="padding:0;min-height:40px" data-act="copy" data-v="${esc(v)}">コピー</button></div>`;
-  return `<section class="card stack"><h2>カード利用の取り込み</h2>
-    <p class="muted hint" style="margin:0;font-size:13px">iPhoneのショートカットで、ウォレットで払ったときにお店と金額をこのアプリへ送ります。下の3つをショートカットに貼り付けます。鍵は人に見せないでください。</p>
-    ${k ? box('① 送り先のURL', url) + box('② apikey(公開用の鍵)', C.key) + box('③ あなたの取り込み用の鍵(p_token)', k)
-        + '<button class="btn" data-act="cardKeyRenew">鍵を作り直す(古い鍵は使えなくなります)</button>'
-        : '<button class="btn primary" data-act="cardKey">設定に使う情報を表示する</button>'}</section>`;
 }

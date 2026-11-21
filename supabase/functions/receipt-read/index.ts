@@ -10,6 +10,7 @@
 // AI を別のものに替えるときは、readReceipt() だけを書き換えればよい。
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+export const VERSION = '2026-11-21';   // 状態チェックで「新しい版か」を見るための印
 
 export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', 'その他'];
 
@@ -135,6 +136,7 @@ if (typeof Deno !== 'undefined' && Deno.serve) Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser(auth.replace(/^Bearer\s+/i, ''));
     if (!user) return json({ error: 'ログインが必要です' }, 401);
     const { image, mime, mode } = await req.json();
+    if (mode === 'version') return json({ ok: true, version: VERSION, gemini: !!Deno.env.get('GEMINI_API_KEY') });   // 状態チェック用
     if (!image || image.length > 8_000_000) return json({ error: '写真がないか、大きすぎます' }, 400);
     if (mode === 'paper') {   // 紙から予定・やること:読み取って返すだけ
       const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);

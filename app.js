@@ -187,7 +187,7 @@ function renderSetup() {
 // メールのリンクはSafariで開くため、アプリ側では「メールアドレス+パスワード」でログインする。
 function renderLogin(sent) {
   $app.innerHTML = `<main class="screen plain" style="padding-top:14vh">
-  <h1 style="font-size:30px;color:var(--accent-text)">ふたりの暮らし帳</h1>
+  <h1 style="font-size:1.875rem;color:var(--accent-text)">ふたりの暮らし帳</h1>
   <p class="muted">予定・家計簿・買い物・やることをふたりで共有</p>
   ${sent ? `<div class="card"><h2>メールを送りました</h2><p class="muted">${esc(sent)}</p>
      <button class="btn text" data-act="relogin">ログイン画面に戻る</button></div>` : `
@@ -198,7 +198,7 @@ function renderLogin(sent) {
     <button class="btn primary" type="submit">ログイン</button>
     <button class="btn" type="button" data-act="signup">はじめての方:このパスワードで登録</button>
   </form>
-  <div class="card stack"><p class="muted hint" style="margin:0;font-size:13px">パスワードをまだ決めていない方・忘れた方</p>
+  <div class="card stack"><p class="muted hint" style="margin:0;font-size:0.8125rem">パスワードをまだ決めていない方・忘れた方</p>
     <button class="btn text" data-act="magic">メールのリンクでログイン(Safariで開きます)</button>
     <button class="btn text" data-act="forgot">パスワードを設定し直すメールを送る</button></div>`}</main>`;
 }
@@ -229,7 +229,7 @@ function renderOnboard() {
     <div class="field"><label for="code">招待コード（招待された人だけ）</label><input id="code" type="text" maxlength="8" value="${esc(code)}" placeholder="例：7KQ2M9XA" autocapitalize="characters"></div>
     <p class="err" id="err" hidden></p>
     <button class="btn primary" type="submit">${code ? '暮らし帳に参加する' : 'はじめる'}</button>
-    <p class="muted hint" style="font-size:13px">招待コードが空なら、新しい暮らし帳を作ります。あとから相手を招待できます。</p>
+    <p class="muted hint" style="font-size:0.8125rem">招待コードが空なら、新しい暮らし帳を作ります。あとから相手を招待できます。</p>
   </form>
   <button class="btn text" data-act="logout">別のメールでログインし直す</button></main>`;
 }
@@ -271,6 +271,7 @@ function viewHome() {
   return `<main class="screen">
   <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>今日</h1></div>
     <div class="nav"><a class="iconbtn" href="#search" aria-label="検索">${icon('search')}</a><a class="avatar" href="#settings" style="--c:${colorOf(me.user_id)}" aria-label="設定(${esc(me.display_name)})">${initial}</a></div></div>
+  ${F.welcomeHtml()}
   ${goingBanner()}
   ${F.inboxCount() ? `<a class="banner" href="#kakeibo">${icon('card')}カード利用の確認待ちが${F.inboxCount()}件あります</a>` : ''}
   ${F.moneyCardHtml()}
@@ -310,7 +311,7 @@ function viewShopping() {
   ${done.length ? `<section class="card list"><h2 class="group-title">カゴに入れた（${done.length}）</h2>
     ${done.map(i => `<button class="row done" data-act="toggle" data-id="${i.id}" aria-pressed="true"><span class="box">${icon('tick')}</span>
       <span class="main"><span class="name">${esc(i.name)}</span></span><span class="sub">${esc(nameOf(i.done_by))}</span></button>`).join('')}
-    <div style="display:flex;gap:8px;padding:8px 0 10px"><button class="btn" style="flex:1;font-size:15px;white-space:nowrap" data-act="askClear">リストから消す</button>
+    <div style="display:flex;gap:8px;padding:8px 0 10px"><button class="btn" style="flex:1;font-size:0.9375rem;white-space:nowrap" data-act="askClear">リストから消す</button>
       <button class="btn green" style="flex:1.4" data-act="txFromShop">家計簿に記録する</button></div></section>` : ''}
   </main>
   <div class="addbar"><div class="inner">
@@ -367,11 +368,11 @@ function viewSettings() {
     ${st.members.map(m => `<div class="row"><span class="dot" style="background:${m.color}"></span><span class="main"><span class="name">${esc(m.display_name)}${m.user_id === st.me.user_id ? '（自分）' : ''}</span></span><span class="sub">${m.is_admin ? '管理者' : ''}</span></div>`).join('')}
     ${st.me.is_admin && st.members.length < 5 ? '<button class="btn primary" style="margin:8px 0 10px" data-act="invite">メンバーを招待する</button>' : ''}</section>
   <form class="card stack" data-form="pw" novalidate><h2>${st.recovery ? '新しいパスワードを決めてください' : 'パスワード'}</h2>
-    <p class="muted hint" style="margin:0;font-size:13px">ホーム画面のアプリでは、メールアドレスとこのパスワードでログインします。</p>
+    <p class="muted hint" style="margin:0;font-size:0.8125rem">ホーム画面のアプリでは、メールアドレスとこのパスワードでログインします。</p>
     <input type="text" autocomplete="username" value="${esc(st.session?.user?.email || '')}" hidden>
     <div class="field"><label for="newpw">新しいパスワード(8文字以上)</label><input id="newpw" type="password" autocomplete="new-password"></div>
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">パスワードを設定する</button></form>
-  ${F.appearanceSettingsHtml()}${F.notifySettingsHtml()}${F.calSettingsHtml()}${F.widgetSettingsHtml()}${F.backupSettingsHtml()}${F.cardSettingsHtml()}
+  ${F.statusSettingsHtml()}${F.appearanceSettingsHtml()}${F.notifySettingsHtml()}${F.calSettingsHtml()}${F.widgetSettingsHtml()}${F.backupSettingsHtml()}${F.cardSettingsHtml()}
   <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。ログインは一度すれば残ります。</p></section>
   <a class="btn" href="#trash" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">ゴミ箱(消したものを7日間は戻せます)</a>
   <button class="btn danger" data-act="logout">ログアウト</button>
@@ -383,7 +384,7 @@ function sheet() {
   if (st.sheet.type === 'invite') {
     const link = location.origin + location.pathname + '?join=' + st.sheet.code;
     return `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-label="メンバーを招待" data-stop>
-      <span class="grip"></span><h2 style="font-size:17px">メンバーを招待</h2>
+      <span class="grip"></span><h2 style="font-size:1.0625rem">メンバーを招待</h2>
       <p class="muted">このリンクを相手に送ってください。開いてログインすると参加できます。7日間有効です。</p>
       <div class="codebox">${esc(link)}</div><p class="muted">招待コード：<b>${esc(st.sheet.code)}</b></p>
       <button class="btn primary" data-act="share" data-link="${esc(link)}">リンクを送る</button>
@@ -391,7 +392,7 @@ function sheet() {
   }
   if (st.sheet.type === 'clear') {
     return `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-label="確認" data-stop>
-      <span class="grip"></span><h2 style="font-size:17px">カゴに入れた品物をリストから消しますか？</h2>
+      <span class="grip"></span><h2 style="font-size:1.0625rem">カゴに入れた品物をリストから消しますか？</h2>
       <p class="muted">消した品物は、入力候補には残ります。</p>
       <button class="btn primary" data-act="clear">消す</button><button class="btn" data-act="close">やめる</button></div></div>`;
   }

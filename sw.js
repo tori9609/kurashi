@@ -1,6 +1,6 @@
 // 画面の部品をiPhoneに覚えさせて、2回目から速く開くための仕組み
-const CACHE = 'kurashi-v10';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'features.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png'];
+const CACHE = 'kurashi-v11';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'features.js', 'core.js', 'settings.js', 'calendar.js', 'kakeibo.js', 'receipt.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

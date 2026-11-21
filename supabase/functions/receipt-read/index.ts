@@ -1,7 +1,8 @@
 // ふたりの暮らし帳:レシートの読み取り(Supabase Edge Function「receipt-read」)。2026-11-21
 //
 // アプリから送られたレシートの写真を Gemini に読ませ、お店・日付・合計・品目(分類つき)を受け取って、
-// ログインしている本人の「確認待ち」に入れる。写真はどこにも保存しない。
+// ログインしている本人の「確認待ち」に入れる(写真の保存はアプリが別に行う)。
+// mode: 'paper' のときは、お知らせ・予約票などの紙から、予定とやることの候補を読み取って返すだけ(どこにも書き込まない)。
 //
 // 設定(Supabase の Edge Functions → Secrets)
 //   GEMINI_API_KEY … Google AI Studio で作った鍵(必須)
@@ -65,13 +66,48 @@ export function normalize(r: any, today = new Date()) {
   return { store: String(r.store || '').slice(0, 60), date, time, total, payment: r.payment || 'unknown', items };
 }
 
-export async function readReceipt(imageB64: string, mime: string) {
+// ---------- 紙(お知らせ・予約票)から予定・やることを取り出す ----------
+export const paperPrompt = (today: string) => `この画像は、学校・自治会・病院・役所・会社などのお知らせ、予約票、案内、チラシです。今日は ${today} です。次の決まりで読み取り、JSONだけを返してください。
+- title:紙の題名(なければ内容を短く)
+- items:日付のある予定と、期限のあるやることを、1つずつ取り出す
+  - type:日時に行く・行われるものは event(予定)、それまでに済ませるもの(提出・申込・支払い・持参物の用意)は todo(やること)
+  - title:何か(例:「授業参観」「歯科の予約」「書類の提出」)。誰の・どこのが分かれば短く添える
+  - date:YYYY-MM-DD。年が書いていなければ、今日から見ていちばん近い先の日付にする(30日以上前になるなら翌年)。和暦は西暦に直す
+  - time:開始時刻 HH:MM(なければ空)、end_time:終了時刻 HH:MM(なければ空)
+  - note:持ち物・場所・費用などの大事な補足を1行で(なければ空)
+- 日付が読み取れないものは入れない。同じものを二重に入れない。最大15件`;
+const PAPER_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    title: { type: 'STRING' },
+    items: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+      type: { type: 'STRING', enum: ['event', 'todo'] }, title: { type: 'STRING' }, date: { type: 'STRING' },
+      time: { type: 'STRING' }, end_time: { type: 'STRING' }, note: { type: 'STRING' } }, required: ['type', 'title', 'date'] } },
+  },
+  required: ['items'],
+};
+// deno-lint-ignore no-explicit-any
+export function normalizePaper(r: any) {
+  const ok = (d: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && !Number.isNaN(Date.parse(String(d)));
+  const hm = (t: unknown) => /^\d{1,2}:\d{2}$/.test(String(t || '')) ? String(t).padStart(5, '0') : null;
+  const seen = new Set<string>();
+  const items = (Array.isArray(r?.items) ? r.items : []).map((i: any) => ({
+    type: i?.type === 'todo' ? 'todo' : 'event', title: String(i?.title || '').trim().slice(0, 60), date: String(i?.date || ''),
+    time: hm(i?.time), end_time: hm(i?.end_time), note: String(i?.note || '').trim().slice(0, 100) || null,
+  })).filter((i: any) => i.title && ok(i.date) && !seen.has(i.type + i.title + i.date) && seen.add(i.type + i.title + i.date)).slice(0, 15);
+  if (!items.length) throw new Error('日付のある予定ややることを読み取れませんでした');
+  return { title: String(r?.title || '').slice(0, 60), items };
+}
+
+// Gemini を呼ぶ(モデルが見つからなければ次を試す)
+// deno-lint-ignore no-explicit-any
+async function gemini(imageB64: string, mime: string, prompt: string, schema: unknown): Promise<any> {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) throw new Error('GEMINI_API_KEY が設定されていません');
   const models = [Deno.env.get('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash'].filter(Boolean) as string[];
   const body = JSON.stringify({
-    contents: [{ parts: [{ inline_data: { mime_type: mime || 'image/jpeg', data: imageB64 } }, { text: PROMPT }] }],
-    generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: SCHEMA },
+    contents: [{ parts: [{ inline_data: { mime_type: mime || 'image/jpeg', data: imageB64 } }, { text: prompt }] }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
   });
   let last = '';
   for (const m of models) {
@@ -83,10 +119,12 @@ export async function readReceipt(imageB64: string, mime: string) {
     if (!res.ok) throw new Error(`Gemini の呼び出しに失敗しました(${res.status}): ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
-    return normalize(JSON.parse(text));
+    return JSON.parse(text);
   }
   throw new Error(last || 'Gemini を呼び出せませんでした');
 }
+export const readReceipt = async (imageB64: string, mime: string) => normalize(await gemini(imageB64, mime, PROMPT, SCHEMA));
+export const readPaper = async (imageB64: string, mime: string, today: string) => normalizePaper(await gemini(imageB64, mime, paperPrompt(today), PAPER_SCHEMA));
 
 if (typeof Deno !== 'undefined' && Deno.serve) Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -96,12 +134,16 @@ if (typeof Deno !== 'undefined' && Deno.serve) Deno.serve(async (req) => {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, apikey, { global: { headers: { Authorization: auth } } });
     const { data: { user } } = await sb.auth.getUser(auth.replace(/^Bearer\s+/i, ''));
     if (!user) return json({ error: 'ログインが必要です' }, 401);
-    const { image, mime } = await req.json();
+    const { image, mime, mode } = await req.json();
     if (!image || image.length > 8_000_000) return json({ error: '写真がないか、大きすぎます' }, 400);
+    if (mode === 'paper') {   // 紙から予定・やること:読み取って返すだけ
+      const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      return json({ ok: true, paper: await readPaper(image, mime, today) });
+    }
     const r = await readReceipt(image, mime);
     const { data, error } = await sb.rpc('receipt_add', { p_store: r.store, p_date: r.date, p_total: r.total, p_items: r.items, p_time: r.time });
     if (error) return json({ error: error.message }, 400);
-    return json({ ok: true, merged: data?.merged, receipt: r });
+    return json({ ok: true, merged: data?.merged, id: data?.id, receipt: r });   // id = 入った確認待ち(アプリが写真を結び付ける)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

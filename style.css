@@ -1,22 +1,22 @@
-/* ふたりの暮らし帳：見た目のルール(アクセントカラーは人ごとに選べる。人の色＝だれの情報か、緑＝ふたり) */
+/* ふたりの暮らし帳：見た目のルール(基本の色＝藍紫。人の色＝だれの情報か、緑＝ふたり。赤は「急ぎ」と「超過」だけ) */
 :root{
-  --accent:#0A5BD3; --blue:var(--accent); --orange:#C2570C; --green:#1F8A5B; --ink:#1C1E21; --sub:#5C6370;
-  --bg:#F2F4F7; --card:#FFFFFF; --field:#FFFFFF; --line:#E3E6EB; --red:#B42318; --on-accent:#FFFFFF;
+  --accent:#4F46E5; --blue:var(--accent); --orange:#C2570C; --green:#1F8A5B; --ink:#16181D; --sub:#5D6370;
+  --bg:#F5F6F8; --card:#FFFFFF; --field:#FFFFFF; --line:#E6E8EC; --red:#C2261B; --on-accent:#FFFFFF;
   --accent-soft:color-mix(in srgb, var(--accent) 12%, var(--card)); --accent-text:var(--accent);
-  --tag-bg:#FDEBDD; --tag-ink:#9A3B0B; --ok-bg:#E3F4EC; --ok-ink:#145C3C; --seg:#E3E6EB;
+  --tag-bg:#FDECEA; --tag-ink:#A3211A; --ok-bg:#E3F4EC; --ok-ink:#145C3C; --seg:#ECEEF2;
   --sat:#1A5FD0;
   --safe-b: env(safe-area-inset-bottom, 0px);
   color-scheme: light;
 }
 /* ダーク(iPhoneの設定に合わせる、または設定で「ダーク」) */
 @media (prefers-color-scheme: dark){ :root:not([data-theme=light]){
-  --ink:#F2F2F7; --sub:#A1A1A6; --bg:#000000; --card:#1C1C1E; --field:#2C2C2E; --line:#38383A; --red:#FF6B5E;
-  --accent-text:color-mix(in srgb, var(--accent) 65%, white); --accent-soft:color-mix(in srgb, var(--accent) 28%, var(--card));
-  --tag-bg:#4A2A12; --tag-ink:#FFB27A; --ok-bg:#12352A; --ok-ink:#7EE2B8; --seg:#2C2C2E; --green:#2FA572; --sat:#6EA8FF; color-scheme: dark; } }
+  --ink:#F1F2F4; --sub:#9EA3AD; --bg:#0E0F12; --card:#17191E; --field:#22252B; --line:#2A2D34; --red:#FF7A6E;
+  --accent-text:color-mix(in srgb, var(--accent) 55%, white); --accent-soft:color-mix(in srgb, var(--accent) 26%, var(--card));
+  --tag-bg:#4A1D1A; --tag-ink:#FFB4AB; --ok-bg:#12352A; --ok-ink:#7EE2B8; --seg:#22252B; --green:#2FA572; --sat:#8FB4FF; color-scheme: dark; } }
 :root[data-theme=dark]{
-  --ink:#F2F2F7; --sub:#A1A1A6; --bg:#000000; --card:#1C1C1E; --field:#2C2C2E; --line:#38383A; --red:#FF6B5E;
-  --accent-text:color-mix(in srgb, var(--accent) 65%, white); --accent-soft:color-mix(in srgb, var(--accent) 28%, var(--card));
-  --tag-bg:#4A2A12; --tag-ink:#FFB27A; --ok-bg:#12352A; --ok-ink:#7EE2B8; --seg:#2C2C2E; --green:#2FA572; --sat:#6EA8FF; color-scheme: dark; }
+  --ink:#F1F2F4; --sub:#9EA3AD; --bg:#0E0F12; --card:#17191E; --field:#22252B; --line:#2A2D34; --red:#FF7A6E;
+  --accent-text:color-mix(in srgb, var(--accent) 55%, white); --accent-soft:color-mix(in srgb, var(--accent) 26%, var(--card));
+  --tag-bg:#4A1D1A; --tag-ink:#FFB4AB; --ok-bg:#12352A; --ok-ink:#7EE2B8; --seg:#22252B; --green:#2FA572; --sat:#8FB4FF; color-scheme: dark; }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
@@ -183,3 +183,112 @@ fieldset.chips legend{font-size:13px;color:var(--sub);margin-bottom:6px;padding:
 .swatch[aria-pressed=true]{box-shadow:0 0 0 3px var(--ink)}
 .swatch.auto{background:conic-gradient(var(--c) 0 50%, var(--card) 0)}
 .offline{position:sticky;top:0;z-index:8;background:var(--tag-bg);color:var(--tag-ink);font-size:13px;font-weight:700;padding:calc(env(safe-area-inset-top,0px) + 8px) 16px 8px;line-height:1.5}
+.plus{color:var(--green)}
+.minus{color:var(--red)}
+.ctag.inc{background:color-mix(in srgb, var(--green) 15%, var(--card));color:var(--green)}
+.two-seg{grid-template-columns:1fr 1fr}
+.two-seg button{border:0;border-radius:10px;min-height:40px;background:transparent;font-weight:700;color:var(--sub)}
+.two-seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.rphoto{width:100%;max-height:70vh;object-fit:contain;border-radius:12px;border:1px solid var(--line);background:var(--field)}
+
+/* ふり返りの棒グラフと表 */
+.rbars{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:end;height:150px;padding-top:6px}
+.rbar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px}
+.rbar i{display:block;width:70%;min-height:2px;border-radius:6px 6px 2px 2px;background:var(--seg)}
+.rbar.cur i{background:var(--accent)}
+.rbar .v{font-size:11.5px;color:var(--sub)}
+.rbar .m{font-size:12.5px;font-weight:700;color:var(--sub)}
+.rbar.cur .m{color:var(--ink)}
+.rtable{width:100%;border-collapse:collapse;font-size:14px}
+.rtable th{font-size:12.5px;color:var(--sub);font-weight:700;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}
+.rtable th:first-child,.rtable td:first-child{text-align:left}
+.rtable td{text-align:right;padding:8px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.rtable td.minus{color:var(--red)} .rtable td.plus{color:var(--green)}
+/* 紙から読み取った候補 */
+.prow{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.pcheck{display:flex;align-items:flex-start;padding-top:10px}
+.pcheck input{width:22px;height:22px}
+.pfields{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+/* そろそろ買う頃 */
+.soonchips{flex-wrap:wrap;overflow:visible}
+.soonchips button{display:flex;flex-direction:column;align-items:flex-start;min-height:48px;padding:6px 14px;border-radius:14px;font-size:14px;font-weight:700;background:var(--field)}
+.soonchips button small{font-size:11.5px;font-weight:400;color:var(--sub)}
+/* 固定費:金額の2段表示と、1年あたりの棒 */
+.row .amt{display:flex;flex-direction:column;align-items:flex-end;gap:1px;text-align:right}
+.row .amt small{font-size:11.5px;color:var(--sub);font-weight:400}
+.row .amt b small{font-size:12px;color:var(--sub);margin-left:1px}
+.yrow{display:grid;grid-template-columns:minmax(0,8em) 1fr auto;gap:10px;align-items:center;padding:7px 0;font-size:14px}
+.yname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ybar{height:10px;border-radius:6px;background:var(--seg);overflow:hidden}
+.ybar i{display:block;height:100%;border-radius:6px;background:var(--accent)}
+.yrow b{font-variant-numeric:tabular-nums}
+
+/* ===== 2026-11 見た目の作り直し:自作アイコン・今日のホーム・真ん中の「＋」 ===== */
+.ic{width:20px;height:20px;flex:none;vertical-align:-4px}
+.ic.fill{fill:currentColor}
+h1{letter-spacing:.01em}
+.card{border:1px solid var(--line);border-radius:18px}
+.iconbtn{width:44px;height:44px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;padding:0;text-decoration:none}
+.iconbtn .ic{width:22px;height:22px}
+.iconbtn.solid{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.avatar{width:44px;height:44px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;text-decoration:none;
+  background:color-mix(in srgb, var(--c) 16%, var(--card));color:color-mix(in srgb, var(--c) 80%, var(--ink));border:2px solid var(--c)}
+.back{display:inline-flex;align-items:center;gap:2px;text-decoration:none;font-weight:700}
+.back .ic{width:16px;height:16px}
+.btn .ic,.pill .ic,.banner .ic,.offline .ic{width:20px;height:20px;margin-right:6px}
+.btn.icon-left,label.btn{display:flex;align-items:center;justify-content:center;gap:2px;cursor:pointer}
+.caret .ic{width:20px;height:20px}
+.box .ic{width:16px;height:16px;stroke-width:2.6}
+.sugg .ic{width:15px;height:15px;margin-right:3px;vertical-align:-3px}
+.addrow .plus .ic,.plus .ic{width:24px;height:24px}
+.offline{display:flex;align-items:flex-start;gap:4px}
+.banner{display:flex;align-items:center;gap:4px;text-decoration:none}
+/* 下のメニュー(真ん中は「＋」) */
+.tabbar{align-items:stretch}
+.tabbar a{gap:2px}
+.tabbar .ic{width:24px;height:24px}
+.tabbar a[aria-current=page] .ic{stroke-width:2.2}
+.tab-add{flex:1;display:flex;align-items:center;justify-content:center;border:0;background:none;padding:0;min-height:44px}
+.tab-add .ic{width:52px;height:52px;padding:13px;border-radius:50%;background:var(--accent);color:var(--on-accent);stroke-width:2.2;margin-top:-14px;
+  box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent)}
+.fab{display:none}
+/* 予定タブの中の切り替え */
+.seg.plan{display:grid;grid-template-columns:1fr 1fr}
+.seg.plan a{display:flex;align-items:center;justify-content:center;gap:6px;min-height:40px;border-radius:10px;text-decoration:none;color:var(--sub);font-weight:700;font-size:14px}
+.seg.plan a[aria-selected=true]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.seg.plan .ic{width:18px;height:18px}
+/* ホーム:お金のカード */
+.money{text-decoration:none;color:var(--ink);gap:6px;background:color-mix(in srgb, var(--accent) 7%, var(--card));border-color:color-mix(in srgb, var(--accent) 22%, var(--line))}
+.money small{font-size:13px;color:var(--sub);font-weight:700}
+.money .big{font-size:30px;font-weight:800;letter-spacing:.01em;font-variant-numeric:tabular-nums}
+.money.over .big{color:var(--red)}
+.meter{display:block;height:8px;border-radius:6px;background:var(--seg);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:6px;background:var(--accent)}
+.money.over .meter i{background:var(--red)}
+/* ホーム:今日のリスト */
+.today .group-title{display:flex;align-items:center;gap:6px}
+.today .group-title .ic,.card .group-title .ic{width:16px;height:16px}
+.row .lead{width:22px;height:22px;color:var(--sub)}
+.empty{margin:12px 0;color:var(--sub);font-size:14px;text-align:center}
+.more{display:flex;align-items:center;justify-content:space-between;min-height:48px;text-decoration:none;font-weight:700;color:var(--accent-text);border-top:1px solid var(--line);margin-top:4px}
+.more .ic{width:18px;height:18px}
+.act{display:flex;gap:10px;align-items:flex-start;padding:8px 0}
+.act .dot{margin-top:7px}
+.act .main{display:flex;flex-direction:column;font-size:14px}
+.act .sub{font-size:12px;color:var(--sub)}
+/* 真ん中の「＋」で開く追加メニュー */
+.qgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.qtile{display:flex;align-items:center;gap:10px;min-height:56px;padding:0 14px;border-radius:14px;border:1px solid var(--line);background:var(--card);font-weight:700;font-size:15px;color:var(--ink);text-align:left;cursor:pointer}
+.qtile .ic{width:24px;height:24px;color:var(--accent-text)}
+.swatch.std{outline:2px dashed var(--line);outline-offset:2px}
+a.row{text-decoration:none;color:inherit}
+.head .nav{align-items:center}
+/* 説明文:ふだんはしまい、「？」で出す(設定と入力の画面はいつも出す) */
+.screen .hint{display:none}
+html.help .screen .hint,html[data-route=settings] .screen .hint{display:block}
+.iconbtn.help{color:var(--sub)}
+.iconbtn.help.on{background:var(--accent-soft);border-color:color-mix(in srgb, var(--accent) 40%, var(--line));color:var(--accent-text)}
+.pill{white-space:nowrap}
+.seg button{white-space:nowrap;font-size:13.5px;padding:0 4px}
+.miss{border-color:color-mix(in srgb, var(--orange) 40%, var(--line))}
+.miss .row .pill{min-height:40px;padding:0 12px;font-size:13px}

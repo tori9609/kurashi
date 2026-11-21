@@ -10,16 +10,17 @@ const APP = "https://tori9609.github.io/kurashi/";
 const SHOW_PRIVATE = false;       // true にすると「自分だけ」の予定・やることも出す(ロック画面で人に見える点に注意)
 
 // ---------- 色と文字 ----------
-const C = {
-  bg: Color.dynamic(new Color("#F2F4F8"), new Color("#1C1C1E")),
-  ink: Color.dynamic(new Color("#1C1E21"), new Color("#F2F2F7")),
-  sub: Color.dynamic(new Color("#65676B"), new Color("#A1A1A6")),
-  faint: Color.dynamic(new Color("#B0B3B8"), new Color("#636366")),
-  blue: new Color("#0A5BD3"),
-  pastBlue: new Color("#7FA6E6"),
-  red: new Color("#C62828"),
-  redBg: Color.dynamic(new Color("#FDECEC"), new Color("#4A1F1F")),
-  shared: new Color("#1E8A5A"),
+const C = {   // 暮らし帳と同じ色(基本の色＝藍紫、緑＝ふたり、赤＝急ぎ・超過・日曜、青＝土曜)
+  bg: Color.dynamic(new Color("#F5F6F8"), new Color("#17191E")),
+  ink: Color.dynamic(new Color("#16181D"), new Color("#F1F2F4")),
+  sub: Color.dynamic(new Color("#5D6370"), new Color("#9EA3AD")),
+  faint: Color.dynamic(new Color("#B0B4BC"), new Color("#5A5F68")),
+  accent: new Color("#4F46E5"),
+  pastAccent: Color.dynamic(new Color("#A5A0F0"), new Color("#6E68C8")),
+  sat: Color.dynamic(new Color("#1A5FD0"), new Color("#8FB4FF")),
+  red: Color.dynamic(new Color("#C2261B"), new Color("#FF7A6E")),
+  redBg: Color.dynamic(new Color("#FDECEA"), new Color("#4A1D1A")),
+  shared: new Color("#1F8A5B"),
   white: new Color("#FFFFFF"),
 };
 const W = "日月火水木金土";
@@ -120,32 +121,33 @@ function miniCal(stack, d, width) {
   const hd = row(stack);
   for (let i = 0; i < 7; i++) {
     const c = hd.addStack(); c.size = new Size(cw, 13); c.centerAlignContent(); const wd = (i + WEEK_START) % 7;
-    text(c, W[wd], 9, { color: wd === 0 ? C.red : wd === 6 ? C.blue : C.sub, center: true });
+    text(c, W[wd], 9, { color: wd === 0 ? C.red : wd === 6 ? C.sat : C.sub, center: true });
   }
   for (let wk = 0; wk < 5; wk++) {
     const r = row(stack);
     for (let i = 0; i < 7; i++) {
       const s = addDays(start, wk * 7 + i), dd = D(s), isT = s === d.today, n = count[s] || 0, past = s < d.today;
       const c = r.addStack(); c.size = new Size(cw, ch); c.centerAlignContent(); c.cornerRadius = ch / 2;
-      if (isT) c.backgroundColor = C.blue;
+      if (isT) c.backgroundColor = C.accent;
       const label = dd.getDate() === 1 ? `${dd.getMonth() + 1}/1` : String(dd.getDate());
-      text(c, label, 11, { bold: isT || n > 0, center: true, color: isT ? C.white : n > 0 ? (past ? C.pastBlue : C.blue) : past ? C.faint : C.ink });
+      text(c, label, 11, { bold: isT || n > 0, center: true, color: isT ? C.white : n > 0 ? (past ? C.pastAccent : C.accent) : past ? C.faint : C.ink });
     }
   }
 }
-// 今月のお金(ふたりの支出と、予算の残り)
+// 今月のお金(ふたりの支出と、1日あたりあと使える額)
 function money(stack, d, size) {
   const r = row(stack);
   text(r, `💴 今月のふたりの支出 ${yen(d.spent)}`, size, { color: C.sub });
   if (d.budget) {
     r.addSpacer();
-    const rest = d.budget - d.spent;
-    text(r, rest >= 0 ? `予算の残り ${yen(rest)}` : `予算超え ${yen(-rest)}`, size, { bold: true, color: rest >= 0 ? C.shared : C.red });
+    // あと使える額:予算 − 使った分 − これから払う固定費 を、今日を含む残りの日数で割る
+    const rest = d.budget - d.spent - (d.upcoming || 0), left = d.days_left || 1;
+    text(r, rest >= 0 ? `1日 ${yen(Math.floor(rest / left))}(あと${left}日)` : `予算超え ${yen(-rest)}`, size, { bold: true, color: rest >= 0 ? C.shared : C.red });
   }
 }
 function header(w, d, stale, compact) {
   const h = row(w);
-  text(h, "暮らし帳", 12, { bold: true, color: C.blue });
+  text(h, "暮らし帳", 12, { bold: true, color: C.accent });
   if (!compact) { h.addSpacer(6); text(h, md(d.today), 11, { color: C.sub }); }
   h.addSpacer();
   text(h, stale ? "⚠︎ 前回の内容" : `${d.at} 更新`, 10, { color: stale ? C.red : C.sub });
@@ -162,7 +164,7 @@ async function build(family, param) {
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
   if (!d) {
     w.setPadding(12, 12, 12, 12);
-    text(w, "暮らし帳", 12, { bold: true, color: C.blue });
+    text(w, "暮らし帳", 12, { bold: true, color: C.accent });
     text(w, "読み込めませんでした", 13, { lines: 2 });
     text(w, err || "", 10, { color: C.sub, lines: 3 });
     w.url = APP + "#settings";

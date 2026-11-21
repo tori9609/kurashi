@@ -15,21 +15,15 @@ const AISLES = [
   ['日用品', ['トイレットペーパー','ティッシュ','洗剤','シャンプー','ゴミ袋','ラップ','歯ブラシ']],
 ];
 const DEFAULT_NAMES = ['牛乳','卵','食パン','豆腐','納豆','キャベツ','玉ねぎ','鶏むね肉','トイレットペーパー','洗剤'];
-const ICON = {
-  home: '<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/>',
-  cal: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>',
-  yen: '<path d="M6 4l6 8 6-8M12 12v8M7 13h10M7 17h10"/>',
-  cart: '<path d="M3 4h3l2 11h11l2-8H7"/><circle cx="10" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/>',
-  check: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
-};
-const TABS = [['home','ホーム','home'],['calendar','予定','cal'],['kakeibo','家計簿','yen'],['shopping','買い物','cart'],['chores','やること','check']];
+// 下のメニュー:ホーム・予定(カレンダーとやること)・真ん中の「＋」・買い物・家計簿
+const TABS = [['home','ホーム','home'],['calendar','予定','cal'],['+'],['shopping','買い物','cart'],['kakeibo','家計簿','wallet']];
 
 const st = { session: null, me: null, members: [], items: [], names: [], acts: [], going: {}, urgent: false, sheet: null, channel: null };
 let sb = null;
 
 // ---------- 小さな道具 ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-const icon = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+const icon = (k, cls) => F.ic(k, cls);
 const nameOf = uid => (st.members.find(m => m.user_id === uid) || {}).display_name || '（退出したメンバー）';
 const colorOf = uid => (st.members.find(m => m.user_id === uid) || {}).color || '#9AA1AC';
 const route = () => (location.hash.replace('#', '') || 'home');
@@ -204,7 +198,7 @@ function renderLogin(sent) {
     <button class="btn primary" type="submit">ログイン</button>
     <button class="btn" type="button" data-act="signup">はじめての方:このパスワードで登録</button>
   </form>
-  <div class="card stack"><p class="muted" style="margin:0;font-size:13px">パスワードをまだ決めていない方・忘れた方</p>
+  <div class="card stack"><p class="muted hint" style="margin:0;font-size:13px">パスワードをまだ決めていない方・忘れた方</p>
     <button class="btn text" data-act="magic">メールのリンクでログイン(Safariで開きます)</button>
     <button class="btn text" data-act="forgot">パスワードを設定し直すメールを送る</button></div>`}</main>`;
 }
@@ -235,7 +229,7 @@ function renderOnboard() {
     <div class="field"><label for="code">招待コード（招待された人だけ）</label><input id="code" type="text" maxlength="8" value="${esc(code)}" placeholder="例：7KQ2M9XA" autocapitalize="characters"></div>
     <p class="err" id="err" hidden></p>
     <button class="btn primary" type="submit">${code ? '暮らし帳に参加する' : 'はじめる'}</button>
-    <p class="muted" style="font-size:13px">招待コードが空なら、新しい暮らし帳を作ります。あとから相手を招待できます。</p>
+    <p class="muted hint" style="font-size:13px">招待コードが空なら、新しい暮らし帳を作ります。あとから相手を招待できます。</p>
   </form>
   <button class="btn text" data-act="logout">別のメールでログインし直す</button></main>`;
 }
@@ -247,40 +241,48 @@ function render() {
   const body = { home: viewHome, shopping: viewShopping, settings: viewSettings, trash: F.viewTrash, search: F.viewSearch, calendar: F.viewCalendar, chores: F.viewChores, kakeibo: F.viewKakeibo }[r] || viewHome;
   st.dirty = false;
   F.applyTheme();
-  const off = st.offline ? `<div class="offline" role="status">📵 圏外です。${st.snapAt ? new Date(st.snapAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '時点の' : '端末に残っている'}内容を表示しています。${outbox().length ? `送っていない変更 ${outbox().length}件は、つながったら送ります。` : '買い物とやることのチェックは、圏外でもできます。'}</div>` : '';
+  const off = st.offline ? `<div class="offline" role="status">${icon('cloudOff')}圏外です。${st.snapAt ? new Date(st.snapAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '時点の' : '端末に残っている'}内容を表示しています。${outbox().length ? `送っていない変更 ${outbox().length}件は、つながったら送ります。` : '買い物とやることのチェックは、圏外でもできます。'}</div>` : '';
   $app.innerHTML = off + body() + tabbar(r) + sheet();
+  helpButton(r);
   saveSnap();
   const inp = document.getElementById('add'); if (inp && st.keepFocus) { inp.focus(); st.keepFocus = false; }
 }
 
+// 説明文は「？」を押したときだけ出す(設定の画面と、入力の画面はいつも出す)
+function helpButton(r) {
+  const root = document.documentElement; root.dataset.route = r; root.classList.toggle('help', !!st.help);
+  const head = $app.querySelector('.screen > .head'); if (r === 'settings' || !head || !$app.querySelector('.screen .hint')) return;
+  let nav = head.querySelector('.nav'); if (!nav) { nav = document.createElement('div'); nav.className = 'nav'; head.appendChild(nav); }
+  nav.insertAdjacentHTML('afterbegin', `<button class="iconbtn help${st.help ? ' on' : ''}" data-act="helpToggle" aria-pressed="${!!st.help}" aria-label="${st.help ? '説明をしまう' : '説明を出す'}">${icon('help')}</button>`);
+}
 function tabbar(r) {
-  return `<nav class="tabbar" aria-label="メニュー">${TABS.map(([k, l, ic]) =>
-    `<a href="#${k}" ${r === k ? 'aria-current="page"' : ''}>${icon(ic)}<span>${l}</span></a>`).join('')}</nav>`;
+  const cur = r === 'chores' ? 'calendar' : r;
+  return `<nav class="tabbar" aria-label="メニュー">${TABS.map(([k, l, ic]) => k === '+'
+    ? `<button class="tab-add" data-act="quickAdd" aria-label="追加する">${icon('plus')}</button>`
+    : `<a href="#${k}" ${cur === k ? 'aria-current="page"' : ''}>${icon(ic)}<span>${l}</span></a>`).join('')}</nav>`;
 }
 
 function viewHome() {
   const todo = st.items.filter(i => !i.done), urgent = todo.filter(i => i.urgent);
   const d = new Date(), w = '日月火水木金土'[d.getDay()], evs = F.eventsOn(F.ymd(d)), chs = F.choresToday();
+  const me = st.me, initial = esc((me.display_name || '?').slice(0, 1));
+  const shop = urgent.map(i => `<a class="row" href="#shopping" style="--c:${colorOf(i.added_by)}">${icon('cart', 'lead')}<span class="main"><span class="name">${esc(i.name)}${i.qty > 1 ? ' ×' + i.qty : ''}</span><span class="sub">${F.who(i.added_by)}が追加</span></span><span class="tag">急ぎ</span></a>`).join('');
+  const none = !evs.length && !chs.length && !urgent.length;
   return `<main class="screen">
-  <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>ふたりの暮らし帳</h1></div>
-    <div class="nav"><a class="pill" href="#search" aria-label="検索" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">🔍</a><a class="pill" href="#settings" style="display:flex;align-items:center;text-decoration:none;color:var(--ink)">設定</a></div></div>
+  <div class="head"><div><small>${d.getMonth() + 1}月${d.getDate()}日(${w})</small><h1>今日</h1></div>
+    <div class="nav"><a class="iconbtn" href="#search" aria-label="検索">${icon('search')}</a><a class="avatar" href="#settings" style="--c:${colorOf(me.user_id)}" aria-label="設定(${esc(me.display_name)})">${initial}</a></div></div>
   ${goingBanner()}
-  ${F.inboxCount() ? `<a class="banner" href="#kakeibo" style="text-decoration:none">カード利用の確認待ちが${F.inboxCount()}件あります。家計簿で記録してください</a>` : ''}
-  <section class="card"><h2>買い物リスト</h2>
-    ${urgent.length ? urgent.map(i => `<div style="display:flex;gap:10px;align-items:center"><span class="tag">急ぎ</span><span>${esc(i.name)}</span></div>`).join('') : '<p class="muted">急ぎの品物はありません</p>'}
-    <a href="#shopping" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">リストを開く（残り${todo.length}件）</a></section>
-  <section class="card"><h2>お知らせ</h2>
-    ${st.acts.length ? st.acts.slice(0, 6).map(a => `<div style="display:flex;gap:10px;align-items:flex-start"><span class="dot" style="background:${colorOf(a.user_id)};margin-top:6px"></span>
-      <div style="display:flex;flex-direction:column"><span>${esc(a.message)}</span><span class="muted" style="font-size:12px">${new Date(a.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div></div>`).join('') : '<p class="muted">まだお知らせはありません</p>'}</section>
-  <section class="card list"><h2 class="group-title">今日の予定</h2>
-    ${evs.length ? evs.slice(0, 5).map(F.evRow).join('') : '<p class="muted" style="margin:0">今日の予定はありません</p>'}
-    <a href="#calendar" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">カレンダーを開く</a></section>
-  <section class="card list"><h2 class="group-title">今日やること</h2>
-    ${chs.length ? chs.map(F.choreRow).join('') : '<p class="muted" style="margin:0">今日やることはありません</p>'}
-    <a href="#chores" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">やることを開く</a></section>
-  <section class="card"><h2>今月のふたりの支出</h2>
-    ${F.isThisMonth() ? `<p style="margin:0;font-size:26px;font-weight:700">¥${F.sharedTotal().toLocaleString('ja-JP')}</p>` : ''}
-    <a href="#kakeibo" class="btn text" style="display:flex;align-items:center;text-decoration:none;padding:0">家計簿を開く</a></section>
+  ${F.inboxCount() ? `<a class="banner" href="#kakeibo">${icon('card')}カード利用の確認待ちが${F.inboxCount()}件あります</a>` : ''}
+  ${F.moneyCardHtml()}
+  <section class="card list today">
+    ${evs.length ? `<h2 class="group-title">${icon('cal')}予定</h2>${evs.slice(0, 6).map(F.evRow).join('')}` : ''}
+    ${chs.length ? `<h2 class="group-title">${icon('todo')}やること</h2>${chs.map(F.choreRow).join('')}` : ''}
+    ${urgent.length ? `<h2 class="group-title">${icon('cart')}急ぎの買い物</h2>${shop}` : ''}
+    ${none ? '<p class="empty">今日の予定・やること・急ぎの買い物はありません</p>' : ''}
+    <a class="more" href="#shopping">買い物リスト 残り${todo.length}件${icon('right')}</a></section>
+  ${st.acts.length ? `<section class="card list"><h2 class="group-title">${icon('bell')}お知らせ</h2>
+    ${st.acts.slice(0, 3).map(a => `<div class="act"><span class="dot" style="background:${colorOf(a.user_id)}"></span><span class="main"><span>${esc(a.message)}</span>
+      <span class="sub">${new Date(a.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></span></div>`).join('')}</section>` : ''}
   </main>`;
 }
 
@@ -299,13 +301,14 @@ function viewShopping() {
   <div class="head"><div><small>みんなで共有</small><h1>買い物リスト</h1></div>
     <button class="pill go ${going ? 'on' : ''}" data-act="going" aria-pressed="${going}">${going ? '買い物おわり' : '買い物に行く'}</button></div>
   ${goingBanner()}
+  ${F.soonHtml(st.names, st.items)}
   ${groups.map(({ g, items }) => `<section class="card list"><h2 class="group-title">${g}</h2>
     ${items.map(i => `<button class="row" data-act="toggle" data-id="${i.id}" aria-pressed="false" style="--c:${colorOf(i.added_by)}">
       <span class="box"></span><span class="main"><span class="name">${esc(i.name)}${i.qty > 1 ? ' ×' + i.qty : ''}</span><span class="sub">${F.who(i.added_by)}が追加</span></span>
       ${i.urgent ? '<span class="tag">急ぎ</span>' : ''}</button>`).join('')}</section>`).join('')}
   ${!todo.length ? '<p class="muted" style="text-align:center">買うものはありません</p>' : ''}
   ${done.length ? `<section class="card list"><h2 class="group-title">カゴに入れた（${done.length}）</h2>
-    ${done.map(i => `<button class="row done" data-act="toggle" data-id="${i.id}" aria-pressed="true"><span class="box">✓</span>
+    ${done.map(i => `<button class="row done" data-act="toggle" data-id="${i.id}" aria-pressed="true"><span class="box">${icon('tick')}</span>
       <span class="main"><span class="name">${esc(i.name)}</span></span><span class="sub">${esc(nameOf(i.done_by))}</span></button>`).join('')}
     <div style="display:flex;gap:8px;padding:8px 0 10px"><button class="btn" style="flex:1;font-size:15px;white-space:nowrap" data-act="askClear">リストから消す</button>
       <button class="btn green" style="flex:1.4" data-act="txFromShop">家計簿に記録する</button></div></section>` : ''}
@@ -315,7 +318,7 @@ function viewShopping() {
     <form class="addrow" data-form="add"><label class="sr" for="add">追加する品物</label>
       <input id="add" type="text" maxlength="60" placeholder="品物を追加（例：牛乳 2）" value="${esc(st.draft || '')}" enterkeyhint="done" autocomplete="off">
       <button type="button" class="pill ${st.urgent ? 'on' : ''}" data-act="urgent" aria-pressed="${st.urgent}" style="border-radius:12px;min-height:48px">急ぎ</button>
-      <button type="submit" class="plus" aria-label="追加">＋</button></form></div></div>`;
+      <button type="submit" class="plus" aria-label="追加">${icon('plus')}</button></form></div></div>`;
 }
 
 // 入力候補（日本語入力を邪魔しないよう、候補の部分だけを書きかえる）
@@ -334,18 +337,18 @@ function suggHtml() {
   const q = kana(parseItem(st.draft || '').name);
   let list = candidates().filter(c => !inList.has(c.name));
   if (q) list = list.filter(c => kana(c.name).includes(q)).sort((a, b) => kana(b.name).startsWith(q) - kana(a.name).startsWith(q));
-  return list.slice(0, q ? 10 : 12).map(c => `<button type="button" data-act="quick" data-name="${esc(c.name)}"${c.pinned ? ' class="pin"' : ''}>${c.pinned ? '★' : '＋'} ${esc(c.name)}</button>`).join('')
-    + (q ? '' : '<button type="button" class="edit" data-act="suggEdit">✎ ボタンを編集</button>');
+  return list.slice(0, q ? 10 : 12).map(c => `<button type="button" data-act="quick" data-name="${esc(c.name)}"${c.pinned ? ' class="pin"' : ''}>${icon(c.pinned ? 'star' : 'plus', c.pinned ? 'fill' : '')}${esc(c.name)}</button>`).join('')
+    + (q ? '' : `<button type="button" class="edit" data-act="suggEdit">${icon('edit')}ボタンを編集</button>`);
 }
 function suggSheet() {
   const all = candidates(), hidden = st.names.filter(r => r.hidden);
   const row = c => `<div class="row"><span class="main"><span class="name">${esc(c.name)}</span><span class="sub">${c.preset ? '最初から入っている品物' : `これまで${c.uses}回`}</span></span>
-    <button class="pill${c.pinned ? ' on' : ''}" data-act="pin" data-name="${esc(c.name)}" aria-pressed="${c.pinned}" aria-label="${esc(c.name)}をいつもボタンに出す">${c.pinned ? '★ 固定中' : '☆ 固定'}</button>
+    <button class="pill${c.pinned ? ' on' : ''}" data-act="pin" data-name="${esc(c.name)}" aria-pressed="${c.pinned}" aria-label="${esc(c.name)}をいつもボタンに出す">${icon('star', c.pinned ? 'fill' : '')}${c.pinned ? '固定中' : '固定'}</button>
     <button class="pill" data-act="hideName" data-name="${esc(c.name)}" aria-label="${esc(c.name)}を候補から外す">外す</button></div>`;
   return `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-label="ボタンを編集" data-stop>
     <h2>買い物のボタンを編集</h2>
-    <p class="muted" style="margin:0">★を付けた品物は、いつも先頭にボタンで出ます。ほかは、よく買う順に並びます。入力中は、入れた文字を含む品物だけが出ます。</p>
-    <form class="addrow" data-form="pinAdd"><label class="sr" for="pinName">ボタンにする品物</label><input id="pinName" type="text" maxlength="60" placeholder="ボタンにしたい品物(例：ヨーグルト)" autocomplete="off"><button type="submit" class="plus" aria-label="ボタンに追加">＋</button></form>
+    <p class="muted" style="margin:0">星を付けた品物は、いつも先頭にボタンで出ます。ほかは、よく買う順に並びます。入力中は、入れた文字を含む品物だけが出ます。</p>
+    <form class="addrow" data-form="pinAdd"><label class="sr" for="pinName">ボタンにする品物</label><input id="pinName" type="text" maxlength="60" placeholder="ボタンにしたい品物(例：ヨーグルト)" autocomplete="off"><button type="submit" class="plus" aria-label="ボタンに追加">${icon('plus')}</button></form>
     <div class="list">${all.map(row).join('')}</div>
     ${hidden.length ? `<h3 class="sub-title">候補から外したもの</h3><div class="list">${hidden.map(r => `<div class="row"><span class="main"><span class="name">${esc(r.name)}</span></span><button class="pill" data-act="unhideName" data-name="${esc(r.name)}">戻す</button></div>`).join('')}</div>` : ''}
     <button class="btn" data-act="close">閉じる</button></div></div>`;
@@ -359,18 +362,18 @@ async function saveName(name, patch) {
 
 function viewSettings() {
   return `<main class="screen">
-  <div class="head"><div><small><a href="#home">‹ ホーム</a></small><h1>設定</h1></div></div>
+  <div class="head"><div><small><a href="#home" class="back">${icon('left')}ホーム</a></small><h1>設定</h1></div></div>
   <section class="card list"><h2 class="group-title">メンバー（最大5人）</h2>
     ${st.members.map(m => `<div class="row"><span class="dot" style="background:${m.color}"></span><span class="main"><span class="name">${esc(m.display_name)}${m.user_id === st.me.user_id ? '（自分）' : ''}</span></span><span class="sub">${m.is_admin ? '管理者' : ''}</span></div>`).join('')}
     ${st.me.is_admin && st.members.length < 5 ? '<button class="btn primary" style="margin:8px 0 10px" data-act="invite">メンバーを招待する</button>' : ''}</section>
   <form class="card stack" data-form="pw" novalidate><h2>${st.recovery ? '新しいパスワードを決めてください' : 'パスワード'}</h2>
-    <p class="muted" style="margin:0;font-size:13px">ホーム画面のアプリでは、メールアドレスとこのパスワードでログインします。</p>
+    <p class="muted hint" style="margin:0;font-size:13px">ホーム画面のアプリでは、メールアドレスとこのパスワードでログインします。</p>
     <input type="text" autocomplete="username" value="${esc(st.session?.user?.email || '')}" hidden>
     <div class="field"><label for="newpw">新しいパスワード(8文字以上)</label><input id="newpw" type="password" autocomplete="new-password"></div>
     <p class="err" id="err" hidden></p><button class="btn primary" type="submit">パスワードを設定する</button></form>
   ${F.appearanceSettingsHtml()}${F.notifySettingsHtml()}${F.calSettingsHtml()}${F.widgetSettingsHtml()}${F.backupSettingsHtml()}${F.cardSettingsHtml()}
   <section class="card"><h2>アプリとして使う</h2><p class="muted">Safariの共有ボタン →「ホーム画面に追加」で、アイコンから開けます。ログインは一度すれば残ります。</p></section>
-  <a class="btn" href="#trash" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">🗑 ゴミ箱(消したものを7日間は戻せます)</a>
+  <a class="btn" href="#trash" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">ゴミ箱(消したものを7日間は戻せます)</a>
   <button class="btn danger" data-act="logout">ログアウト</button>
   </main>`;
 }
@@ -407,8 +410,10 @@ async function addItem(raw) {
   if (!await send('shopping_items', 'insert', row)) return;   // 圏外ならここまで(候補の回数やお知らせは送らない)
   await reloadItems();
   const nr = st.names.find(x => x.name === name), uses = (nr?.uses || 0) + 1, last_used = new Date().toISOString();
-  sb.from('item_names').upsert({ household_id: h, name, uses, last_used, hidden: false }).then(() => {});
-  if (nr) Object.assign(nr, { uses, last_used, hidden: false }); else st.names.unshift({ name, uses, last_used, pinned: false, hidden: false });
+  const added_dates = F.pushDate(nr?.added_dates, F.today());   // 買い時の見当に使う(最近8回の日付)
+  sb.from('item_names').upsert({ household_id: h, name, uses, last_used, hidden: false, added_dates })
+    .then(r => { if (r.error) sb.from('item_names').upsert({ household_id: h, name, uses, last_used, hidden: false }).then(() => {}); });   // SQL(追加分16)の前でも回数は残す
+  if (nr) Object.assign(nr, { uses, last_used, hidden: false, added_dates }); else st.names.unshift({ name, uses, last_used, pinned: false, hidden: false, added_dates });
   sb.from('activities').insert({ household_id: h, message: `${st.me.display_name}さんが「${name}」を買い物リストに追加しました` }).then(() => {});
 }
 
@@ -450,6 +455,7 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (el.dataset.act === 'close' && e.target.closest('[data-stop]') && !e.target.closest('button[data-act="close"]')) return;
   const h = st.me?.household_id, act = el.dataset.act;
+  if (act === 'helpToggle') { st.help = !st.help; render(); return; }
   if (st.me && await F.onClick(act, el)) return;
   if (act === 'logout') { try { localStorage.removeItem(SNAP); localStorage.removeItem(OUTBOX); } catch { /* 無視 */ } await sb.auth.signOut(); st.me = null; return; }
   if (act === 'relogin') return renderLogin();

@@ -120,14 +120,14 @@ async function gemini(imageB64: string, mime: string, prompt: string, schema: un
       });
       if (res.status === 404) { last = `モデル ${m} が見つかりません`; break; }
       if (res.status === 429) throw new Error('Gemini の無料枠の上限に達しました。しばらくしてから試してください');
-      if ([500, 502, 503, 504].includes(res.status)) { busy = true; last = `Gemini が混み合っています(${res.status})`; await res.body?.cancel(); if (a < 2) await wait(1500 * (a + 1)); continue; }
+      if ([500, 502, 503, 504].includes(res.status)) { busy = true; const t = (await res.text()).replace(/\s+/g, ' '); last = `${m}:${res.status} ${(t.match(/"message": ?"([^"]+)/)?.[1] || t).slice(0, 160)}`; if (a < 2) await wait(1500 * (a + 1)); continue; }
       if (!res.ok) throw new Error(`Gemini の呼び出しに失敗しました(${res.status}): ${(await res.text()).slice(0, 200)}`);
       const data = await res.json();
       const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
       return JSON.parse(text);
     }
   }
-  throw new Error(busy ? 'Gemini が混み合っていて読み取れませんでした。数分おいてから、もう一度試してください' : (last || 'Gemini を呼び出せませんでした'));
+  throw new Error(busy ? `Gemini が混み合っていて読み取れませんでした。数分おいてから、もう一度試してください(最後の返事 ${last})` : (last || 'Gemini を呼び出せませんでした'));
 }
 export const readReceipt = async (imageB64: string, mime: string) => normalize(await gemini(imageB64, mime, PROMPT, SCHEMA));
 export const readPaper = async (imageB64: string, mime: string, today: string) => normalizePaper(await gemini(imageB64, mime, paperPrompt(today), PAPER_SCHEMA));

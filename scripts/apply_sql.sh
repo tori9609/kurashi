@@ -7,6 +7,9 @@ set -euo pipefail
 DIR="${1:-supabase}"
 psql_q() { psql "$DB_URL" -v ON_ERROR_STOP=1 -q -At "$@"; }
 
+if ! psql_q -c "select 1" > /dev/null; then
+  echo "::error::データベースに入れませんでした。GitHub の Secrets の SUPABASE_DB_URL を、Supabase の「Connect → Session pooler」の1行で貼り直してください(ユーザー名は postgres.英数字、[YOUR-PASSWORD] はパスワードに置き換え)"; exit 1
+fi
 if [ "$(psql_q -c "select to_regclass('public.app_meta') is not null")" != "t" ]; then
   echo "::error::app_meta がありません。最初の1回だけ、まとめ_014から019.sql を Supabase の SQL Editor で実行してください"; exit 1
 fi

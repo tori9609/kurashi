@@ -161,7 +161,7 @@ export function backupSettingsHtml() {
 
 // ---------- 設定:状態チェック(準備ができているかをまとめて見る) ----------
 export const APP_VERSION = '2026-11-21';   // アプリの版(GitHubに上げた版が届いているかの目安)
-export const NEED = { schema: 19, fn: '2026-11-21' };
+export const NEED = { schema: 19, fn: '2026-11-23' };
 export async function runStatus() {
   const st = C.st, inv = async (name, body) => { try { const r = await sb().functions.invoke(name, { body }); return r.error ? { err: r.error.message || 'error' } : r.data || {}; } catch (e) { return { err: e.message }; } };
   const [db, push, rr] = await Promise.all([sb().rpc('app_status').then(r => r.error ? { err: r.error.message } : r.data || {}), inv('push', { action: 'version' }), inv('receipt-read', { mode: 'version' })]);

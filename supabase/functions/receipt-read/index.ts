@@ -10,7 +10,7 @@
 // AI を別のものに替えるときは、readReceipt() だけを書き換えればよい。
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-export const VERSION = '2026-11-21';   // 状態チェックで「新しい版か」を見るための印
+export const VERSION = '2026-11-23';   // 状態チェックで「新しい版か」を見るための印
 
 export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', 'その他'];
 
@@ -100,29 +100,34 @@ export function normalizePaper(r: any) {
   return { title: String(r?.title || '').slice(0, 60), items };
 }
 
-// Gemini を呼ぶ(モデルが見つからなければ次を試す)
+// Gemini を呼ぶ。混み合い(500・502・503・504)のときは少し待って最大3回やり直し、だめなら次のモデルを試す
+// モデルが見つからない(404)ときも次を試す。無料枠の上限(429)はやり直しても無駄なので、すぐ知らせる
 // deno-lint-ignore no-explicit-any
 async function gemini(imageB64: string, mime: string, prompt: string, schema: unknown): Promise<any> {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) throw new Error('GEMINI_API_KEY が設定されていません');
-  const models = [Deno.env.get('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash'].filter(Boolean) as string[];
+  const models = [...new Set([Deno.env.get('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(Boolean) as string[])];
   const body = JSON.stringify({
     contents: [{ parts: [{ inline_data: { mime_type: mime || 'image/jpeg', data: imageB64 } }, { text: prompt }] }],
     generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
   });
-  let last = '';
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+  let last = '', busy = false;
   for (const m of models) {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body,
-    });
-    if (res.status === 404) { last = `モデル ${m} が見つかりません`; continue; }
-    if (res.status === 429) throw new Error('Gemini の無料枠の上限に達しました。しばらくしてから試してください');
-    if (!res.ok) throw new Error(`Gemini の呼び出しに失敗しました(${res.status}): ${(await res.text()).slice(0, 200)}`);
-    const data = await res.json();
-    const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
-    return JSON.parse(text);
+    for (let a = 0; a < 3; a++) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body,
+      });
+      if (res.status === 404) { last = `モデル ${m} が見つかりません`; break; }
+      if (res.status === 429) throw new Error('Gemini の無料枠の上限に達しました。しばらくしてから試してください');
+      if ([500, 502, 503, 504].includes(res.status)) { busy = true; last = `Gemini が混み合っています(${res.status})`; await res.body?.cancel(); if (a < 2) await wait(1500 * (a + 1)); continue; }
+      if (!res.ok) throw new Error(`Gemini の呼び出しに失敗しました(${res.status}): ${(await res.text()).slice(0, 200)}`);
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
+      return JSON.parse(text);
+    }
   }
-  throw new Error(last || 'Gemini を呼び出せませんでした');
+  throw new Error(busy ? 'Gemini が混み合っていて読み取れませんでした。数分おいてから、もう一度試してください' : (last || 'Gemini を呼び出せませんでした'));
 }
 export const readReceipt = async (imageB64: string, mime: string) => normalize(await gemini(imageB64, mime, PROMPT, SCHEMA));
 export const readPaper = async (imageB64: string, mime: string, today: string) => normalizePaper(await gemini(imageB64, mime, paperPrompt(today), PAPER_SCHEMA));

@@ -52,12 +52,61 @@ function inboxHtml() {
 }
 export const monthLabel = mo => `${Number(mo.slice(0, 4))}年${Number(mo.slice(5))}月`;
 export const shiftMonth = (mo, n) => { const [y, m] = mo.split('-').map(Number); return ymd(new Date(y, m - 1 + n, 1)).slice(0, 7); };
-// 精算:ふたりの支出を人数で割り、払った額との差を出す
+// 負担の分け方:'equal'(空も)=割り勘、'u:<人>:70'=その人が70%、'y:<人>:820'=その人が820円。残りはほかの人で等分
+const parseSplit = sp => { const m = /^([uy]):([0-9a-f-]{36}):(\d+)$/.exec(sp || ''); return m && C.st.members.some(x => x.user_id === m[2]) ? { yen: m[1] === 'y', uid: m[2], n: Number(m[3]) } : null; };
+// 画面に出す短い言い方(割り勘のときは空)。budget=true は予算向けの「〇〇持ち」
+export function splitText(sp, budget) {
+  if (sp === 'deal') return '返してもらった額で済み';
+  const p = parseSplit(sp); if (!p) return '';
+  const n = C.nameOf(p.uid);
+  return p.yen ? `${n}${yen(p.n)}負担` : p.n === 100 ? (budget ? `${n}持ち` : `${n}のおごり`) : `${n}${p.n % 10 ? p.n + '%' : p.n / 10 + '割'}負担`;
+}
+// 負担の分け方の入力欄(選ぶ欄+割合・金額の欄)。id は欄の名前の頭、budget=true は予算用(金額では決めない)、blank は先頭の空の選択肢
+export function splitField(id, cur, { budget = false, blank = '' } = {}) {
+  const p = parseSplit(cur), mode = cur === '' || cur == null ? (blank ? '' : 'equal') : cur === 'deal' && !budget ? 'deal' : !p ? 'equal' : p.yen ? 'a:' + p.uid : p.n === 100 ? 'u:' + p.uid + ':100' : 'p:' + p.uid;
+  const o = (v, l) => `<option value="${v}" ${v === mode ? 'selected' : ''}>${l}</option>`;
+  const opts = (blank ? o('', blank) : '') + o('equal', '割り勘(人数で等分)') + (budget ? '' : o('deal', '返してもらった額で済ませる(割合を決めない)')) + C.st.members.map(m => { const n = C.esc(m.display_name);
+    return o(`u:${m.user_id}:100`, budget ? `${n}持ち` : `${n}のおごり(全額)`) + o('p:' + m.user_id, `${n}が割合で負担…`) + (budget ? '' : o('a:' + m.user_id, `${n}が金額で負担…`)); }).join('');
+  const show = /^[pa]:/.test(mode), unit = mode.startsWith('a:') ? '円' : '%';
+  return `<select id="${id}" data-split="${id}">${opts}</select>
+    <div class="splitn" id="${id}Box" ${show ? '' : 'hidden'}><input id="${id}N" type="text" inputmode="numeric" maxlength="9" placeholder="${unit === '円' ? '例:820' : '例:70'}" value="${p && p.n !== 100 || p?.yen ? p.n : ''}" aria-label="負担の${unit === '円' ? '金額' : '割合'}"><span id="${id}U">${unit}</span></div>`;
+}
+// 入力欄から split を組み立てる。まちがいは { err }
+export function readSplit(id, amount) {
+  const v = (document.getElementById(id)?.value ?? '').trim(); if (!/^[pa]:/.test(v)) return { split: v || null };
+  const raw = (document.getElementById(id + 'N')?.value ?? '').replace(/[\uFF10-\uFF19]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,\uFF0C円%\uFF05\s]/g, '');
+  const n = Number(raw), uid = v.slice(2);
+  if (!raw || !Number.isInteger(n) || n < 0) return { err: '負担の割合・金額を数字で入れてください' };
+  if (v.startsWith('p:')) return n > 100 ? { err: '割合は0〜100で入れてください' } : { split: `u:${uid}:${n}` };
+  return amount && n > amount ? { err: '負担の金額が支払いの金額より大きくなっています' } : { split: `y:${uid}:${n}` };
+}
+// 1件の支出を、だれがいくら負担するかに分ける
+function burden(t) {
+  const ms = C.st.members, n = ms.length || 1, p = parseSplit(t.split), out = {};
+  if (t.split === 'deal' && n >= 2) {   // ほかの人は返した額だけ、残りは払った人
+    const r = Math.min(t.repaid_amount || 0, t.amount);
+    ms.forEach(m => { out[m.user_id] = m.user_id === t.paid_by ? t.amount - r : r / (n - 1); }); return out;
+  }
+  if (!p || n < 2) { ms.forEach(m => { out[m.user_id] = t.amount / n; }); return out; }
+  const mine = p.yen ? Math.min(p.n, t.amount) : t.amount * p.n / 100;
+  ms.forEach(m => { out[m.user_id] = m.user_id === p.uid ? mine : (t.amount - mine) / (n - 1); });
+  return out;
+}
+// 精算:ふたりの支出を負担の分け方どおりに割り、払った額との差を出す
+// 返してもらった額は、払った人の「払った」から引き、ほかの人の「払った」に負担の割合で足す
 export function settle() {
   const { st } = C, shared = (st.tx || []).filter(t => t.scope === 'shared' && !isIncome(t));
-  const total = shared.reduce((a, t) => a + t.amount, 0), n = st.members.length || 1, share = total / n;
-  const bal = st.members.map(m => { const paid = shared.filter(t => t.paid_by === m.user_id).reduce((a, t) => a + t.amount, 0); return { m, paid, diff: paid - share }; });
-  return { total, share, bal };
+  const total = shared.reduce((a, t) => a + t.amount, 0), owe = {}, paid = {};
+  shared.forEach(t => {
+    const b = burden(t), r = Math.min(t.repaid_amount || 0, t.amount);
+    for (const k in b) owe[k] = (owe[k] || 0) + b[k];
+    paid[t.paid_by] = (paid[t.paid_by] || 0) + t.amount - r;
+    if (r) { const others = st.members.filter(m => m.user_id !== t.paid_by), sum = others.reduce((a, m) => a + (b[m.user_id] || 0), 0);
+      others.forEach(m => { paid[m.user_id] = (paid[m.user_id] || 0) + r * (sum ? (b[m.user_id] || 0) / sum : 1 / others.length); }); }
+  });
+  const bal = st.members.map(m => { const pd = paid[m.user_id] || 0, share = owe[m.user_id] || 0; return { m, paid: pd, share, diff: pd - share }; });
+  const custom = shared.some(t => parseSplit(t.split) || t.split === 'deal' || t.repaid_amount);
+  return { total, bal, custom };
 }
 export const sharedTotal = () => settle().total;
 // 今月あと使える額:予算の合計 − ふたりの支出 − これから払う固定費(予算のある分類だけ)を、今日を含む残りの日数で割る
@@ -145,21 +194,22 @@ function kbReview() {
 }
 function kbList() {
   const { st, esc } = C, tx = st.tx || [];
-  const { total, bal } = settle();
+  const { total, bal, custom } = settle();
   const priv = tx.filter(t => t.scope === 'private' && !isIncome(t)).reduce((a, t) => a + t.amount, 0);
   const inc = tx.filter(isIncome), me = st.me.user_id, sumOf = a => a.reduce((x, t) => x + t.amount, 0);
   const myIn = sumOf(inc.filter(t => t.paid_by === me)), myOut = sumOf(tx.filter(t => !isIncome(t) && t.paid_by === me)), bal0 = myIn - myOut;
-  const byCat = CATS.map(c => ({ c, spent: tx.filter(t => t.scope === 'shared' && !isIncome(t) && t.category === c).reduce((a, t) => a + t.amount, 0), budget: (st.budgets.find(b => b.category === c) || {}).amount || 0 }))
+  const byCat = CATS.map(c => ({ c, spent: tx.filter(t => t.scope === 'shared' && !isIncome(t) && t.category === c).reduce((a, t) => a + t.amount, 0), budget: (st.budgets.find(b => b.category === c) || {}).amount || 0, sp: splitText((st.budgets.find(b => b.category === c) || {}).split, true) }))
     .filter(x => x.spent || x.budget);
   const settled = st.settles.find(s => s.month === st.kb.month);
   let settleHtml = '';
   if (st.members.length >= 2 && total) {
     const sorted = [...bal].sort((a, b) => a.diff - b.diff);
     const msg = st.members.length === 2
-      ? (Math.round(sorted[1].diff) > 0 ? `<b>${esc(sorted[0].m.display_name)}さん → ${esc(sorted[1].m.display_name)}さんに ${yen(sorted[1].diff)}</b> 払うと半分ずつになります` : 'ちょうど半分ずつです')
+      ? (Math.round(sorted[1].diff) > 0 ? `<b>${esc(sorted[0].m.display_name)}さん → ${esc(sorted[1].m.display_name)}さんに ${yen(sorted[1].diff)}</b> 払うと${custom ? '決めた負担どおり' : '半分ずつ'}になります` : `ちょうど${custom ? '決めた負担どおり' : '半分ずつ'}です`)
       : bal.map(b => `${esc(b.m.display_name)}:${b.diff >= 0 ? '+' : '−'}${yen(Math.abs(b.diff))}`).join(' / ');
-    settleHtml = `<section class="card"><h2>精算(ふたりの支出を人数で割る)</h2>
-      <p style="margin:0">${bal.map(b => `${esc(b.m.display_name)}さん ${yen(b.paid)}`).join('・')}</p><p style="margin:0">${msg}</p>
+    settleHtml = `<section class="card"><h2>精算(ふたりの支出を負担の分け方どおりに割る)</h2>
+      ${bal.map(b => `<p style="margin:0">${esc(b.m.display_name)}さん:払った ${yen(Math.round(b.paid))}・負担 ${yen(Math.round(b.share))}</p>`).join('')}
+      ${tx.some(t => t.repaid_amount && t.scope === 'shared') ? '<p class="muted" style="margin:0;font-size:0.8125rem">「払った」は、その場で返してもらった額をやりとりしたあとの額です。</p>' : ''}<p style="margin:0">${msg}</p>
       ${settled ? `<p class="muted" style="margin:0">${new Date(settled.settled_at).toLocaleDateString('ja-JP')}に${esc(C.nameOf(settled.settled_by))}さんが精算済みにしました</p><button class="btn" data-act="unsettle">精算済みを取り消す</button>`
         : '<button class="btn green" data-act="settle">精算済みにする</button>'}</section>`;
   }
@@ -170,14 +220,14 @@ function kbList() {
   ${billsHtml()}${missesHtml()}${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
     ${inc.length ? `<div class="sum"><div><small>収入(見えている分)</small><b class="plus">+${yen(sumOf(inc))}</b></div><div><small>自分の収支(自分の収入 − 自分が払った分)</small><b class="${bal0 >= 0 ? 'plus' : 'minus'}">${bal0 >= 0 ? '+' : '−'}${yen(Math.abs(bal0))}</b></div></div>` : ''}
     <button class="btn text" data-act="txNewIncome" style="padding:0;min-height:40px;align-self:flex-start">${ic('income')}収入を記録</button>
-    ${byCat.map(x => `<div class="bar"><span>${x.c}</span><span>${yen(x.spent)}${x.budget ? ' / ' + yen(x.budget) : ''}</span>
+    ${byCat.map(x => `<div class="bar"><span>${x.c}${x.sp ? `<small class="muted">(${esc(x.sp)})</small>` : ''}</span><span>${yen(x.spent)}${x.budget ? ' / ' + yen(x.budget) : ''}</span>
       ${x.budget ? `<i><b style="width:${Math.min(100, x.spent / x.budget * 100)}%;background:${x.spent > x.budget ? 'var(--red)' : 'var(--blue)'}"></b></i>` : ''}</div>`).join('')}
   </section>
   ${settleHtml}
   <section class="card list"><h2 class="group-title">記録(${tx.length}件)</h2>
     ${days.length ? days.map(d => `<h3 class="day-title">${md(d)}</h3>` + tx.filter(t => t.date === d).map(t => `<button class="row" data-act="txOpen" data-id="${t.id}" ${edge(t.paid_by)}>
       <span class="dot" style="background:${C.colorOf(t.paid_by)}"></span><span class="main"><span class="name">${esc(t.shop || t.category)}</span>
-      <span class="sub">${isIncome(t) ? '<span class="ctag inc">収入</span>・' : ''}${t.category}・${who(t.paid_by)}が${isIncome(t) ? '受け取った' : '払った'}${t.scope === 'private' ? '・自分だけ' : ''}${t.fixed_cost_id ? '・固定費' : ''}${t.receipt_path ? '・写真あり' : ''}</span></span><b${isIncome(t) ? ' class="plus"' : ''}>${isIncome(t) ? '+' : ''}${yen(t.amount)}</b></button>`).join('')).join('')
+      <span class="sub">${isIncome(t) ? '<span class="ctag inc">収入</span>・' : ''}${t.category}・${who(t.paid_by)}が${isIncome(t) ? '受け取った' : '払った'}${t.scope === 'private' ? '・自分だけ' : splitText(t.split) ? '・' + esc(splitText(t.split)) : ''}${t.repaid_amount && t.scope === 'shared' ? `・${yen(t.repaid_amount)}返金済み` : ''}${t.fixed_cost_id ? '・固定費' : ''}${t.receipt_path ? '・写真あり' : ''}</span></span><b${isIncome(t) ? ' class="plus"' : ''}>${isIncome(t) ? '+' : ''}${yen(t.amount)}</b></button>`).join('')).join('')
       : '<p class="muted" style="margin:0 0 10px">この月の記録はまだありません</p>'}
     ${tx.length ? '<button class="btn text" data-act="csv">この月をCSVで書き出す</button>' : ''}</section>
 `;
@@ -194,6 +244,8 @@ export function txFormHtml() {
     ${s.inbox ? '' : `<div class="seg two-seg" role="group" aria-label="支出か収入か">${kd('expense', '支出')}${kd('income', '収入')}</div>`}
     ${mine ? field('txScope', '見せる範囲', `<select id="txScope">${inc ? sc('private', '自分だけ(相手には見えません)') + sc('shared', 'ふたりに見せる') : sc('shared', 'ふたりの支出(精算の対象)') + sc('private', '自分だけ(相手には見えません)')}</select>`)
       : `<p class="muted hint" style="margin:0;font-size:0.8125rem">相手が記録した${inc ? '収入' : '支出'}なので、見せる範囲は相手だけが変えられます。</p>`}
+    ${inc ? '' : field('txSplit', '負担の分け方(ふたりの支出のとき)', t ? splitField('txSplit', t.split || 'equal') : splitField('txSplit', s.split ?? '', { blank: '分類のめやすどおり(決めていなければ割り勘)' }))}
+    ${inc ? '' : field('txRepaid', '払った人が、その場で返してもらった額(円・なくてもよい)', `<input id="txRepaid" type="text" inputmode="numeric" maxlength="9" placeholder="例:820" value="${t?.repaid_amount || ''}">`)}
     ${s.inbox ? `<p class="muted" style="margin:0">${esc(s.card || 'カード')}で払った分です。</p>` : ''}
     ${field('txAmt', '金額(円)', `<input id="txAmt" type="text" inputmode="numeric" maxlength="9" placeholder="例：1280" value="${s.amt || ''}">`)}
     <fieldset class="chips"><legend>分類</legend>${cats.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === def ? 'checked' : ''}><span>${c}</span></label>`).join('')}</fieldset>
@@ -206,7 +258,7 @@ export function txFormHtml() {
 }
 export function txSheetHtml() {
   const { st, esc } = C, s = st.sheet, t = (st.tx || []).find(x => x.id === s.id); if (!t) return '';
-  return sheetWrap(`${esc(t.shop || t.category)} ${isIncome(t) ? '+' : ''}${yen(t.amount)}`, `<p class="muted" style="margin:0">${md(t.date)}・${isIncome(t) ? '収入・' : ''}${t.category}・${esc(C.nameOf(t.paid_by))}が${isIncome(t) ? '受け取った' : '払った'}・${t.scope === 'private' ? '自分だけ' : isIncome(t) ? 'ふたりに見せる' : 'ふたりの支出'}</p>
+  return sheetWrap(`${esc(t.shop || t.category)} ${isIncome(t) ? '+' : ''}${yen(t.amount)}`, `<p class="muted" style="margin:0">${md(t.date)}・${isIncome(t) ? '収入・' : ''}${t.category}・${esc(C.nameOf(t.paid_by))}が${isIncome(t) ? '受け取った' : '払った'}・${t.scope === 'private' ? '自分だけ' : isIncome(t) ? 'ふたりに見せる' : 'ふたりの支出・' + esc(splitText(t.split) || '割り勘') + (t.repaid_amount ? `・${yen(t.repaid_amount)}返金済み` : '')}</p>
     ${!isIncome(t) ? `<button class="btn" data-act="deadlineNew" data-from="tx">${ic('alarm')}保証・契約の期限をやることに登録</button>` : ''}
     ${t.receipt_path ? (s.photo ? `<img class="rphoto" src="${esc(s.photo)}" alt="レシートの写真">` : `<button class="btn" data-act="photoShow" data-path="${esc(t.receipt_path)}">${ic('receipt')}レシートの写真を見る</button>`) : ''}
     ${t.items?.length ? `<div class="items">${t.items.map(x => `<div class="irow ro"><span>${esc(x.name)}</span><span>${yen(x.price)}</span></div>`).join('')}</div>` : ''}
@@ -265,7 +317,9 @@ export const addYears = (d, n) => { const x = dt(d); x.setFullYear(x.getFullYear
 export function quickHtml() {
   const t = (to, k, l) => `<button class="qtile" data-act="quickGo" data-to="${to}">${ic(k)}<span>${l}</span></button>`;
   const f = (id, k, l, multi) => `<label class="qtile">${ic(k)}<span>${l}</span><input id="${id}" type="file" accept="image/*" ${multi ? 'multiple' : ''} hidden></label>`;
-  return sheetWrap('追加する', `<div class="qgrid">${t('ev', 'cal', '予定')}${t('todo', 'todo', 'やること')}${t('shop', 'cart', '買い物')}${t('tx', 'wallet', '支出')}${t('inc', 'income', '収入')}${f('rcptFile', 'camera', 'レシートを撮る', true)}${f('paperFile', 'doc', '紙のお知らせ')}</div>${closeBtn()}`);
+  // 種類ごとに行をそろえる(予定/やること・買い物/お金)
+  const g = (label, tiles) => `<p class="qlabel">${label}</p><div class="qgrid">${tiles}</div>`;
+  return sheetWrap('追加する', `<div class="qgroups">${g('予定', t('ev', 'cal', '予定') + f('paperFile', 'doc', '紙のお知らせ'))}${g('やること・買い物', t('todo', 'todo', 'やること') + t('shop', 'cart', '買い物'))}${g('お金', t('tx', 'wallet', '支出') + t('inc', 'income', '収入') + f('rcptFile', 'camera', 'レシートを撮る', true))}</div>${closeBtn()}`);
 }
 export function deadlineHtml() {
   const { esc } = C, s = C.st.sheet, o = (v, cur, l) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
@@ -286,10 +340,16 @@ export function fixSheetHtml() {
     <button class="btn danger" data-act="fixDel" data-id="${f.id}">この固定費を削除</button>${closeBtn()}`);
 }
 function kbBudget() {
-  const { st } = C;
+  const { st, esc } = C, bOf = c => st.budgets.find(b => b.category === c) || {};
+  // 予算を負担のめやすで割った、ひとりあたりのおおよその額
+  const est = {}; st.budgets.filter(b => b.amount > 0).forEach(b => { const x = burden(b); for (const k in x) est[k] = (est[k] || 0) + x[k]; });
+  const estHtml = st.members.length >= 2 && Object.keys(est).length
+    ? `<p class="muted" style="margin:0;font-size:0.8125rem">負担のめやす:${st.members.map(m => `${esc(m.display_name)}さん 約${yen(Math.round((est[m.user_id] || 0) / 1000) * 1000)}`).join('・')}</p>` : '';
   return `<form class="card stack" data-form="budget" novalidate><h2>1か月の予算(ふたりの支出)</h2>
-    ${CATS.map((c, i) => `<div class="brow"><label for="bg${i}">${c}</label><input id="bg${i}" type="text" inputmode="numeric" maxlength="9" placeholder="なし" value="${(st.budgets.find(b => b.category === c) || {}).amount || ''}"></div>`).join('')}
-    <button class="btn primary" type="submit">保存する</button><p class="muted hint" style="margin:0;font-size:0.8125rem">空にすると、その分類の予算はなしになります。</p></form>`;
+    ${CATS.map((c, i) => `<div class="brow"><label for="bg${i}">${c}</label><input id="bg${i}" type="text" inputmode="numeric" maxlength="9" placeholder="なし" value="${bOf(c).amount || ''}"></div>
+      <div class="brow bsp"><span></span><div>${splitField('bs' + i, bOf(c).split || 'equal', { budget: true })}</div></div>`).join('')}
+    ${estHtml}
+    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">保存する</button><p class="muted hint" style="margin:0;font-size:0.8125rem">空にすると、その分類の予算はなしになります。下の欄は「だれが持つか」のめやすで、その分類の支出を記録するときの初めの負担の分け方になります(記録ごとに変えられます)。</p></form>`;
 }
 function kbGoals() {
   const { st, esc } = C;
@@ -320,8 +380,8 @@ export function confirmHtml() {
     <button class="btn danger" data-act="${s.yes}" data-id="${s.id}">削除する</button>${closeBtn('やめる')}`);
 }
 export function csv() {
-  const { st } = C, rows = [['日付', '金額', 'お店・内容', '分類', '払った人', '共有', '固定費']];
-  [...st.tx].reverse().forEach(t => rows.push([t.date, isIncome(t) ? t.amount : -t.amount, t.shop || '', t.category, C.nameOf(t.paid_by), t.scope === 'shared' ? 'ふたり' : '自分だけ', t.fixed_cost_id ? '○' : '', isIncome(t) ? '収入' : '支出']));
+  const { st } = C, rows = [['日付', '金額', 'お店・内容', '分類', '払った人', '共有', '固定費', '種類', '負担の分け方']];
+  [...st.tx].reverse().forEach(t => rows.push([t.date, isIncome(t) ? t.amount : -t.amount, t.shop || '', t.category, C.nameOf(t.paid_by), t.scope === 'shared' ? 'ふたり' : '自分だけ', t.fixed_cost_id ? '○' : '', isIncome(t) ? '収入' : '支出', t.scope === 'shared' && !isIncome(t) ? (splitText(t.split) || '割り勘') + (t.repaid_amount ? `(${t.repaid_amount}円返金済み)` : '') : '']));
   const text = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   const file = new File([text], `家計簿_${st.kb.month}.csv`, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});

@@ -116,6 +116,23 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_xxxxxxxxxxxx';
 
 ---
 
+
+## 自動で反映する準備(1回だけ。約10分)
+
+これをしておくと、`supabase` フォルダに新しい SQL(`migration_番号_*.sql`)をアップロードするだけで、データベースへ自動で流れます。SQL Editor に貼り付ける作業がいらなくなります。
+
+1. **データベースの接続先をコピーする**
+   Supabase のプロジェクト「kurashi」を開き、画面上の「Connect」を押します。「Session pooler」の欄にある `postgresql://` で始まる1行をコピーし、メモ帳に貼ります。
+   中の `[YOUR-PASSWORD]` を、プロジェクトを作ったときのデータベースのパスワードに書き換えます(`[` `]` も消す)。パスワードを忘れたときは「Project Settings → Database → Reset database password」で作り直せます。
+2. **GitHub に鍵として登録する**
+   GitHub のリポジトリ「kurashi」で「Settings → Secrets and variables → Actions → New repository secret」を押します。
+   Name に `SUPABASE_DB_URL`、Secret に手順1の1行を貼って「Add secret」を押します。
+3. **動くか確かめる**
+   リポジトリの「Actions」→ 左の「SQLを反映」→ 右の「Run workflow」→ 緑の「Run workflow」を押します。1分ほどで緑のチェックが付けば完了です。
+   赤い×で「app_meta がありません」と出たときは、`supabase/まとめ_014から019.sql` を SQL Editor で1回実行してから、もう一度 Run workflow を押します。
+
+Edge Functions(通知・レシート読み取り)の自動反映は、それらを直すときまで準備しなくて大丈夫です(必要になったら `SUPABASE_ACCESS_TOKEN` と `SUPABASE_PROJECT_REF` を同じように登録します)。
+
 ## 困ったとき
 
 | 症状 | 原因と対処 |
@@ -127,4 +144,4 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_xxxxxxxxxxxx';
 | 修正したのに変わらない | iPhone でアプリを一度閉じて開き直す。それでもだめなら1〜2分待つ |
 | 赤いエラーが出た | 画面のスクリーンショットか文字を Claude に送る |
 
-ファイルを直したときは、GitHub のリポジトリで同じように「Add file」→「Upload files」から上書きでアップロードします。
+ファイルを直したときは、GitHub のリポジトリで同じように「Add file」→「Upload files」から上書きでアップロードします。Claude が「アップロード用」フォルダを作ったときは、その中身(ファイルとフォルダ)を全部まとめて、アップロードの画面へドラッグします。フォルダの中の場所もそのまま反映されます。

@@ -113,24 +113,36 @@ function upcoming(stack, d, max, size, withHead = true) {
     evLine(stack, e, size); used++;
   }
 }
-// 前後2週間のカレンダー(5週。予定のある日は青、今日は青い丸、過ぎた日は薄く)
-function miniCal(stack, d, width) {
+// 前後2週間のカレンダー(5週)。日付の下に件名を出す(lines 件まで。入りきらない分は「+件数」)
+// 今日は青い丸、過ぎた日は薄く
+function miniCal(stack, d, width, lines) {
   const t = D(d.today), back = (t.getDay() - WEEK_START + 7) % 7;
-  const start = addDays(d.today, -14 - back), cw = Math.floor(width / 7), ch = 17;
-  const count = {}; d.events.forEach(e => { count[e.date] = (count[e.date] || 0) + 1; });
+  const start = addDays(d.today, -14 - back), cw = Math.floor(width / 7), ch = 15 + lines * 11;
+  const byDay = {}; d.events.forEach(e => { (byDay[e.date] = byDay[e.date] || []).push(e); });
   const hd = row(stack);
   for (let i = 0; i < 7; i++) {
     const c = hd.addStack(); c.size = new Size(cw, 13); c.centerAlignContent(); const wd = (i + WEEK_START) % 7;
     text(c, W[wd], 9, { color: wd === 0 ? C.red : wd === 6 ? C.sat : C.sub, center: true });
   }
   for (let wk = 0; wk < 5; wk++) {
-    const r = row(stack);
+    const r = row(stack); r.topAlignContent();
     for (let i = 0; i < 7; i++) {
-      const s = addDays(start, wk * 7 + i), dd = D(s), isT = s === d.today, n = count[s] || 0, past = s < d.today;
-      const c = r.addStack(); c.size = new Size(cw, ch); c.centerAlignContent(); c.cornerRadius = ch / 2;
-      if (isT) c.backgroundColor = C.accent;
+      const s = addDays(start, wk * 7 + i), dd = D(s), isT = s === d.today, evs = byDay[s] || [], past = s < d.today;
+      const c = r.addStack(); c.layoutVertically(); c.size = new Size(cw, ch); c.spacing = 1;
+      const num = c.addStack(); num.size = new Size(cw, 14); num.centerAlignContent();
+      const badge = num.addStack(); badge.size = new Size(isT ? 22 : cw, 14); badge.centerAlignContent(); badge.cornerRadius = 7;
+      if (isT) badge.backgroundColor = C.accent;
       const label = dd.getDate() === 1 ? `${dd.getMonth() + 1}/1` : String(dd.getDate());
-      text(c, label, 11, { bold: isT || n > 0, center: true, color: isT ? C.white : n > 0 ? (past ? C.pastAccent : C.accent) : past ? C.faint : C.ink });
+      text(badge, label, 10, { bold: isT, center: true, color: isT ? C.white : past ? C.faint : C.ink });
+      const show = evs.length > lines ? evs.slice(0, lines - 1) : evs;
+      show.forEach(e => {
+        const b = c.addStack(); b.size = new Size(cw - 2, 10); b.cornerRadius = 2; b.setPadding(0, 2, 0, 1);
+        b.backgroundColor = new Color(e.color || "#1F8A5B", past ? 0.12 : 0.22);
+        const tx = b.addText(e.title); tx.font = Font.mediumSystemFont(8); tx.lineLimit = 1; tx.textColor = past ? C.sub : C.ink;
+        b.addSpacer();
+      });
+      if (evs.length > lines) text(c, `+${evs.length - show.length}`, 8, { color: C.sub, center: true });
+      c.addSpacer();
     }
   }
 }
@@ -196,7 +208,7 @@ async function build(family, param) {
   header(w, d, stale, family === "small");
   const big = family === "large" || family === "extraLarge";
   if (want === "予定") {
-    if (big) { miniCal(col(w, "#calendar"), d, 300); w.addSpacer(8); upcoming(col(w, "#calendar"), d, 12, 12); }
+    if (big) { miniCal(col(w, "#calendar"), d, 300, 3); w.addSpacer(6); upcoming(col(w, "#calendar"), d, 2, 12); }
     else upcoming(col(w, "#calendar"), d, family === "small" ? 4 : 5, 13, family !== "small");
     w.url = APP + "#calendar";
   } else if (want === "やること") { todos(col(w, "#chores"), d, big ? 14 : 5, 13); w.url = APP + "#chores"; }
@@ -215,9 +227,7 @@ async function build(family, param) {
     money(w, d, 10);
     w.url = APP + "#home";
   } else {
-    miniCal(col(w, "#calendar"), d, 300);
-    w.addSpacer(6);
-    upcoming(col(w, "#calendar"), d, 3, 12, false);
+    miniCal(col(w, "#calendar"), d, 300, 1);   // 件名がカレンダーに出るので、予定の一覧は省く
     w.addSpacer(8);
     const r = w.addStack(); r.layoutHorizontally(); r.topAlignContent();
     const b = col(r, "#chores"); b.size = new Size(150, 0); todos(b, d, 5, 12);

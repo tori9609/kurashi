@@ -2,7 +2,7 @@
 // app.js から道具(st・sb・run など)を受け取って動く。画面は文字列で作り、app.js の render() が表示する。
 import { evFormHtml, evSheetHtml } from './calendar.js';
 import { C, CATS, W, WS_KEY, activity, applyTheme, chk, closeBtn, dt, edge, err, field, h, ic, ls, md, memberOpts, pad, route, sb, sheetWrap, thisMonth, toNum, toast, today, val, who, yen, ymd } from './core.js';
-import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
+import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, readSplit, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
 import { infoHtml, paperHtml, rcptHtml, readPaper, readReceipts, splitByCategory } from './receipt.js';
 import { doSearch, has, loadWidget, pushOff, pushOn, runStatus, widgetScript } from './settings.js';
 export * from './core.js';
@@ -13,6 +13,8 @@ export * from './receipt.js';
 export function setup(ctx) {
   Object.assign(C, ctx);   // 道具は core.js の C に入れて、ほかのファイルからも使う
   document.addEventListener('change', e => { if (e.target.id === 'rcptFile') readReceipts([...e.target.files]); if (e.target.id === 'paperFile') readPaper(e.target.files[0]);
+    if (e.target.dataset?.split) { const id = e.target.dataset.split, v = e.target.value, box = document.getElementById(id + 'Box'), u = document.getElementById(id + 'U'), n = document.getElementById(id + 'N');
+      if (box) box.hidden = !/^[pa]:/.test(v); if (u) u.textContent = v.startsWith('a:') ? '円' : '%'; if (n) n.placeholder = v.startsWith('a:') ? '例:820' : '例:70'; }
     if (e.target.dataset?.cyc) { const m = document.getElementById(e.target.dataset.cyc + 'Mon'); if (m) m.disabled = e.target.value !== 'yearly'; } });
   // カレンダーを左右にスワイプ:左へ=前の月(年)、右へ=次の月(年)
   let sx = 0, sy = 0, on = null;
@@ -298,7 +300,7 @@ export async function onSubmit(f) {
     for (const x of rows) {
       if (x.type === 'event') {
         const id = crypto.randomUUID();   // 先に番号を決めて、メモを同じ予定に付ける
-        const { error } = await sb().from('events').insert({ id, household_id: h(), date: x.date, time: x.time, end_time: x.end_time, title: x.title.slice(0, 80), is_private: priv });
+        const { error } = await sb().from('events').insert({ id, household_id: h(), date: x.date, time: x.time, end_time: x.end_time, title: x.title.slice(0, 80), for_user: st.me.user_id, is_private: priv });
         if (error) { C.toast('登録できませんでした:' + error.message); continue; }
         if (x.note) await sb().from('event_comments').insert({ household_id: h(), event_id: id, body: ('メモ:' + x.note).slice(0, 300) });
       } else await run(sb().from('chores').insert({ household_id: h(), name: x.title.slice(0, 40), category: '用事・手続き', freq: 'once', due: x.date, is_private: priv, created_by: me.user_id }));
@@ -331,7 +333,11 @@ export async function onSubmit(f) {
     const editId = st.sheet?.edit, old = editId && st.tx.find(x => x.id === editId);
     const scope = document.getElementById('txScope') ? val('txScope') : old.scope, shop = val('txShop') || null;
     const kind = INCOME_CATS.includes(category) ? 'income' : 'expense', ib0 = st.sheet?.inbox && st.inbox.find(x => x.id === st.sheet.inbox);
-    const inboxId = st.sheet?.inbox, row = { date, amount, shop, category, paid_by: val('txWho') || me.user_id, scope, kind, ...(ib0?.receipt_path ? { receipt_path: ib0.receipt_path } : {}) };
+    const sr = document.getElementById('txSplit') ? readSplit('txSplit', amount) : { split: old?.split ?? null }; if (sr.err) return err(sr.err);
+    const split = scope === 'shared' && kind !== 'income' ? sr.split : null, repaid_amount = kind !== 'income' && scope === 'shared' ? toNum(val('txRepaid')) || null : null;
+    if (repaid_amount && repaid_amount > amount) return err('返してもらった額が支払いの金額より大きくなっています');
+    if (split === 'deal' && !repaid_amount) return err('「返してもらった額で済ませる」のときは、返してもらった額を入れてください(0円なら払った人のおごりを選んでください)');
+    const inboxId = st.sheet?.inbox, row = { date, amount, shop, category, paid_by: val('txWho') || me.user_id, scope, kind, split, repaid_amount, ...(ib0?.receipt_path ? { receipt_path: ib0.receipt_path } : {}) };
     if (old) { await run(sb().from('transactions').update(row).eq('id', editId), '記録を直しました');
       if (kind === 'expense' && shop && category !== old.category) await learnShop(shop, category);
       if (scope === 'shared' && kind !== 'income') activity(`${me.display_name}さんが家計簿の記録(${category} ${yen(amount)})を直しました`);
@@ -382,8 +388,9 @@ export async function onSubmit(f) {
     await loadFeatures(); C.render(); return true;
   }
   if (f === 'budget') {
-    const rows = CATS.map((c, i) => ({ household_id: h(), category: c, amount: toNum(val('bg' + i)) }));
-    const keep = rows.filter(r => r.amount > 0), drop = rows.filter(r => !r.amount).map(r => r.category);
+    const rows = [];
+    for (const [i, c] of CATS.entries()) { const r = readSplit('bs' + i); if (r.err) return err(`${c}:${r.err}`); rows.push({ household_id: h(), category: c, amount: toNum(val('bg' + i)) || 0, split: r.split || 'equal' }); }
+    const keep = rows.filter(r => r.amount > 0 || r.split !== 'equal'), drop = rows.filter(r => !r.amount && r.split === 'equal').map(r => r.category);
     if (keep.length) await run(sb().from('budgets').upsert(keep));
     if (drop.length) await run(sb().from('budgets').delete().eq('household_id', h()).in('category', drop));
     toast('予算を保存しました'); await loadFeatures(); C.render(); return true;

@@ -20,6 +20,9 @@ export const repText = r => !r ? '' : r.startsWith('weekly') ? `毎週${r.split(
 export const evRow = e => `<button class="row" data-act="evOpen" data-id="${e.id}" ${edge(e.for_user)}><span class="dot" style="background:${evColor(e)}"></span>
   <span class="main"><span class="name">${C.esc(e.title)}</span><span class="sub">${timeText(e)}・${who(e.for_user)}${e.repeat_rule ? '・くり返し' : ''}${imported(e) ? '・' + SRC[e.source] : ''}${e.is_private ? '・自分だけ' : ''}</span></span></button>`;
 
+// 月のマスに件名を出す(3件まで。入りきらない分は「+件数」)。件名はマスの幅で切れる
+const chips = evs => (evs.length > 3 ? evs.slice(0, 2) : evs).map(e => `<b style="--c:${evColor(e)}">${C.esc(e.title)}</b>`).join('')
+  + (evs.length > 3 ? `<b class="more">+${evs.length - 2}</b>` : '');
 export function viewCalendar() {
   const { st } = C, { y, m, sel } = st.cal;
   const ws = weekStart(), lead = (new Date(y, m, 1).getDay() - ws + 7) % 7, days = new Date(y, m + 1, 0).getDate();
@@ -28,7 +31,7 @@ export function viewCalendar() {
   for (let k = 0; k < total; k++) {
     const d = new Date(y, m, 1 - lead + k), ds = ymd(d), out = d.getMonth() !== m, evs = eventsOn(ds);
     cells += `<button class="day${out ? ' out' : ''}${wdClass(d.getDay())}${ds === sel ? ' sel' : ''}${ds === today() ? ' today' : ''}" data-act="calDay" data-d="${ds}" aria-label="${d.getMonth() + 1}月${d.getDate()}日、予定${evs.length}件">
-      <span>${d.getDate()}</span><i>${evs.slice(0, 3).map(e => `<b style="background:${evColor(e)}"></b>`).join('')}</i></button>`;
+      <span>${d.getDate()}</span><i>${chips(evs)}</i></button>`;
   }
   if (st.cal.view === 'year') return viewYear();
   const list = eventsOn(sel);
@@ -81,7 +84,7 @@ export function evFormHtml() {
       : '<p class="muted hint" style="margin:0;font-size:0.8125rem">相手が登録した予定なので、見せる範囲は相手だけが変えられます。</p>'}
     <div class="two">${field('evDate', '日付', `<input id="evDate" type="date" value="${base ? s.day : e?.date || st.cal.sel}">`)}${field('evTime', '時刻(空なら終日)', `<input id="evTime" type="time" value="${e?.time ? e.time.slice(0, 5) : ''}">`)}</div>
     ${field('evEnd', '終わりの時刻(なくてもよい)', `<input id="evEnd" type="time" value="${e?.end_time ? e.end_time.slice(0, 5) : ''}">`)}
-    ${field('evFor', 'だれの予定', `<select id="evFor">${memberOpts(e ? e.for_user : null, 'ふたり')}</select>`)}
+    ${field('evFor', 'だれの予定', `<select id="evFor">${memberOpts(e ? e.for_user : st.me.user_id, 'ふたり')}</select>`)}
     ${base ? '' : field('evRep', 'くり返し', `<select id="evRep">${opt('', 'なし', rep)}${opt('weekly', '毎週(同じ曜日)', rep)}${opt('monthly', '毎月(同じ日)', rep)}</select>`)}
     ${field('evRemind', 'お知らせ(時刻のある予定)', `<select id="evRemind">${REMIND.map(([v, l]) => opt(v, l, rmd)).join('')}</select>`)}
     <p class="muted hint" style="margin:-4px 0 0;font-size:0.8125rem">終日の予定は、朝7時と前日20時のまとめでお知らせします。</p>

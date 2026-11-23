@@ -2,7 +2,7 @@
 // app.js から道具(st・sb・run など)を受け取って動く。画面は文字列で作り、app.js の render() が表示する。
 import { evFormHtml, evSheetHtml } from './calendar.js';
 import { C, CATS, W, WS_KEY, activity, applyTheme, chk, closeBtn, dt, edge, err, field, h, ic, ls, md, memberOpts, pad, route, sb, sheetWrap, thisMonth, toNum, toast, today, val, who, yen, ymd } from './core.js';
-import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, readSplit, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
+import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, csvYear, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, readSplit, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
 import { infoHtml, paperHtml, rcptHtml, readPaper, readReceipts, splitByCategory } from './receipt.js';
 import { doSearch, has, loadWidget, pushOff, pushOn, runStatus, widgetScript } from './settings.js';
 export * from './core.js';
@@ -478,6 +478,10 @@ export async function onClick(act, el) {
       return true;
     }
     case 'kbTab': st.kb.tab = el.dataset.t; C.render(); return true;
+    case 'kbRv': st.kb.rv = el.dataset.v; st.year = null; C.render(); return true;
+    case 'kbYr': st.kb.year = (st.kb.year || Number(st.kb.month.slice(0, 4))) + Number(el.dataset.n); C.render(); return true;
+    case 'kbMine': st.kb.mine = el.dataset.v === '1'; C.render(); return true;
+    case 'kbGoMonth': st.kb.month = el.dataset.m; st.kb.tab = 'list'; await loadTx(true); C.render(); scrollTo(0, 0); return true;
     case 'kbMove': { const n = Number(el.dataset.n); st.kb.month = n ? shiftMonth(st.kb.month, n) : thisMonth(); await loadTx(true); C.render(); return true; }
     case 'txNew': openSheet({ type: 'txNew' }); return true;
     case 'txNewIncome': openSheet({ type: 'txNew', kind: 'income' }); return true;
@@ -514,6 +518,7 @@ export async function onClick(act, el) {
       activity(`${me.display_name}さんが${monthLabel(st.kb.month)}の家計簿を精算済みにしました`); await loadFeatures(); C.render(); return true;
     case 'unsettle': await run(sb().from('settlements').delete().eq('household_id', h()).eq('month', st.kb.month), '取り消しました'); await loadFeatures(); C.render(); return true;
     case 'csv': csv(); return true;
+    case 'csvYear': csvYear(); return true;
     case 'inboxOpen': { const i = st.inbox.find(x => x.id === id); if (!i) return true;
       if (i.items?.length) { st.sheet = { type: 'rcpt', id, form: true, inbox: id }; C.render(); return true; }
       openSheet({ type: 'txNew', inbox: id, amt: i.amount, shop: i.merchant || '', date: inboxDate(i), cat: catFor(i), card: i.card }); return true; }

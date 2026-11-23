@@ -168,10 +168,11 @@ async function loadReview(mo) {
   C.st.review = { mo, rows: error ? [] : data || [] };
 }
 function kbReview() {
-  const { st } = C, mo = st.kb.month;
+  const { st } = C, mo = st.kb.month, sw = rvSwitch();
+  if (st.kb.rv === 'year') return sw + kbYear();
   if (st.review?.mo !== mo) { st.review = { mo, rows: null }; loadReview(mo).then(() => C.render()).catch(() => {}); }
   const rows = st.review.rows;
-  if (!rows) return '<section class="card"><p class="muted" style="margin:0">読み込んでいます…</p></section>';
+  if (!rows) return sw + '<section class="card"><p class="muted" style="margin:0">読み込んでいます…</p></section>';
   const exp = rows.filter(t => t.scope === 'shared' && t.kind !== 'income');
   const months = Array.from({ length: 6 }, (_, i) => shiftMonth(mo, i - 5));
   const tot = months.map(m => exp.filter(t => t.date.startsWith(m)).reduce((a, t) => a + t.amount, 0)), max = Math.max(1, ...tot);
@@ -181,7 +182,7 @@ function kbReview() {
   const cats = CATS.map(c => ({ c, now: byCat(c)(mo), before: byCat(c)(prev) })).filter(x => x.now || x.before).sort((a, b) => b.now - a.now);
   const top = cats[0];
   const lbl = m => `${Number(m.slice(5))}月`;
-  return `<section class="card"><h2>${lbl(mo)}のふたりの支出</h2>
+  return sw + `<section class="card"><h2>${lbl(mo)}のふたりの支出</h2>
     <p style="margin:0;font-size:1.625rem;font-weight:700">${yen(cur)}</p>
     <p class="muted" style="margin:0">${diff === null ? '前の月の記録はありません' : `前の月(${yen(pv)})より ${diff >= 0 ? '+' : ''}${diff}%`}${top?.now ? `・いちばん多いのは${top.c} ${yen(top.now)}` : ''}</p></section>
   <section class="card"><h2 class="group-title">6か月の推移(ふたりの支出)</h2>
@@ -191,6 +192,51 @@ function kbReview() {
       const d = x.now - x.before; return `<tr><td>${x.c}</td><td>${yen(x.now)}</td><td>${yen(x.before)}</td><td class="${d > 0 ? 'minus' : d < 0 ? 'plus' : ''}">${d > 0 ? '+' : d < 0 ? '−' : ''}${yen(Math.abs(d))}</td></tr>`; }).join('')}</tbody></table>`
       : '<p class="muted" style="margin:0 0 8px">この月の記録はまだありません</p>'}
     <p class="muted hint" style="margin:6px 0 0;font-size:0.8125rem">ふたりの支出だけを数えています(自分だけの支出・収入は入りません)。差の赤は増えた分、緑は減った分です。</p></section>`;
+}
+// ふり返りの「月ごと/1年」の切り替え
+const rvSwitch = () => { const v = C.st.kb.rv || 'month';
+  return `<div class="seg" role="tablist" style="grid-template-columns:repeat(2,1fr)">${[['month', '月ごと'], ['year', '1年']].map(([k, l]) => `<button role="tab" aria-selected="${v === k}" data-act="kbRv" data-v="${k}">${l}</button>`).join('')}</div>`; };
+// 1年(1月〜12月)の記録をまとめて読む。1回で返る件数に上限(1000件)があるので、1000件ずつ分けて読む
+async function loadYear(y) {
+  const rows = [];
+  for (let i = 0; ; i += 1000) {
+    const { data, error } = await sb().from('transactions').select('id,date,amount,shop,category,scope,kind,paid_by,split,repaid_amount,fixed_cost_id')
+      .eq('household_id', h()).is('deleted_at', null).gte('date', `${y}-01-01`).lt('date', `${y + 1}-01-01`).order('date').order('id').range(i, i + 999);
+    if (error) break;
+    rows.push(...(data || [])); if (!data || data.length < 1000) break;
+  }
+  C.st.year = { y, rows };
+}
+// 「ふたりの分」はふたりの記録だけ、「自分だけの分も入れる」は自分だけの記録(自分にしか見えない)も足す
+const yearRows = () => { const { st } = C; return (st.year?.rows || []).filter(t => st.kb.mine || t.scope === 'shared'); };
+const man = v => v >= 10000 ? Math.round(v / 10000) + '万' : v ? Math.round(v / 1000) + '千' : '';
+function kbYear() {
+  const { st } = C, kb = st.kb, y = kb.year ||= Number(kb.month.slice(0, 4));
+  if (st.year?.y !== y) { st.year = { y, rows: null }; loadYear(y).then(() => C.render()).catch(() => {}); }
+  const head = `<section class="card" style="padding:10px 16px">
+    <div style="display:flex;align-items:center;justify-content:space-between"><button class="iconbtn" data-act="kbYr" data-n="-1" aria-label="前の年">${ic('left')}</button><b style="font-size:1.125rem">${y}年(1月〜12月)</b><button class="iconbtn" data-act="kbYr" data-n="1" aria-label="次の年">${ic('right')}</button></div>
+    <div class="seg" role="tablist" style="grid-template-columns:repeat(2,1fr)">${[[0, 'ふたりの分'], [1, '自分だけの分も入れる']].map(([k, l]) => `<button role="tab" aria-selected="${(kb.mine ? 1 : 0) === k}" data-act="kbMine" data-v="${k}">${l}</button>`).join('')}</div></section>`;
+  if (!st.year.rows) return head + '<section class="card"><p class="muted" style="margin:0">読み込んでいます…</p></section>';
+  const rows = yearRows(), sum = a => a.reduce((x, t) => x + t.amount, 0), exp = rows.filter(t => !isIncome(t)), inc = rows.filter(isIncome);
+  if (!rows.length) return head + `<section class="card"><p class="muted" style="margin:0">${y}年の記録はありません</p></section>`;
+  const months = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
+  const mE = months.map(m => sum(exp.filter(t => t.date.startsWith(m)))), mI = months.map(m => sum(inc.filter(t => t.date.startsWith(m))));
+  const tE = sum(exp), tI = sum(inc), n = mE.filter(v => v).length, avg = v => yen(n ? Math.round(v / n) : 0), max = Math.max(1, ...mE), cur = thisMonth();
+  const cats = CATS.map(c => ({ c, v: sum(exp.filter(t => t.category === c)) })).filter(x => x.v).sort((a, b) => b.v - a.v);
+  const icats = INCOME_CATS.map(c => ({ c, v: sum(inc.filter(t => t.category === c)) })).filter(x => x.v);
+  const bal = tI - tE;
+  return head + `<section class="card"><div class="sum"><div><small>支出の合計</small><b>${yen(tE)}</b></div><div><small>月あたり(記録のある${n}か月)</small><b>${avg(tE)}</b></div></div>
+    ${tI ? `<div class="sum"><div><small>収入の合計</small><b class="plus">+${yen(tI)}</b></div><div><small>収支(収入 − 支出)</small><b class="${bal >= 0 ? 'plus' : 'minus'}">${bal >= 0 ? '+' : '−'}${yen(Math.abs(bal))}</b></div></div>` : ''}</section>
+  <section class="card"><h2 class="group-title">月ごとの支出</h2>
+    <div class="rbars" style="grid-template-columns:repeat(12,1fr);gap:2px" role="img" aria-label="${y}年の月ごとの支出">${months.map((m, i) => `<div class="rbar${m === cur ? ' cur' : ''}"><span class="v">${man(mE[i])}</span><i style="height:${Math.round(mE[i] / max * 100)}%;width:80%"></i><span class="m">${i + 1}</span></div>`).join('')}</div></section>
+  <section class="card list"><h2 class="group-title">分類ごとの支出(1年)</h2>
+    <table class="rtable"><thead><tr><th>分類</th><th>1年</th><th>月あたり</th><th>割合</th></tr></thead><tbody>${cats.map(x => `<tr><td>${x.c}</td><td>${yen(x.v)}</td><td>${avg(x.v)}</td><td>${Math.round(x.v / tE * 100)}%</td></tr>`).join('')}</tbody></table>
+    ${icats.length ? `<table class="rtable" style="margin-top:10px"><thead><tr><th>収入の分類</th><th>1年</th><th>割合</th></tr></thead><tbody>${icats.map(x => `<tr><td>${x.c}</td><td class="plus">+${yen(x.v)}</td><td>${Math.round(x.v / tI * 100)}%</td></tr>`).join('')}</tbody></table>` : ''}</section>
+  <section class="card list"><h2 class="group-title">月ごとの表</h2>
+    <table class="rtable"><thead><tr><th>月</th><th>支出</th>${tI ? '<th>収入</th><th>収支</th>' : ''}</tr></thead><tbody>${months.map((m, i) => mE[i] || mI[i] ? `<tr><td><button class="btn text" data-act="kbGoMonth" data-m="${m}" style="padding:0;min-height:36px">${i + 1}月</button></td><td>${yen(mE[i])}</td>${tI ? `<td class="plus">${mI[i] ? '+' + yen(mI[i]) : ''}</td><td class="${mI[i] - mE[i] >= 0 ? 'plus' : 'minus'}">${mI[i] - mE[i] >= 0 ? '+' : '−'}${yen(Math.abs(mI[i] - mE[i]))}</td>` : ''}</tr>` : '').join('')}
+      <tr><td><b>合計</b></td><td><b>${yen(tE)}</b></td>${tI ? `<td class="plus"><b>+${yen(tI)}</b></td><td class="${bal >= 0 ? 'plus' : 'minus'}"><b>${bal >= 0 ? '+' : '−'}${yen(Math.abs(bal))}</b></td>` : ''}</tr></tbody></table>
+    <button class="btn text" data-act="csvYear">この1年をCSVで書き出す(${rows.length}件)</button>
+    <p class="muted hint" style="margin:6px 0 0;font-size:0.8125rem">${kb.mine ? 'ふたりの記録と、自分だけの記録(自分にしか見えない分)を合わせています。' : 'ふたりの記録だけを数えています(自分だけの記録は入りません)。'}月の名前を押すと、その月の記録を開きます。</p></section>`;
 }
 function kbList() {
   const { st, esc } = C, tx = st.tx || [];
@@ -379,11 +425,19 @@ export function confirmHtml() {
   return sheetWrap(s.title, `<p class="muted" style="margin:0">${s.note || '消したものは7日間、「設定 → ゴミ箱」から戻せます。'}</p>
     <button class="btn danger" data-act="${s.yes}" data-id="${s.id}">削除する</button>${closeBtn('やめる')}`);
 }
-export function csv() {
-  const { st } = C, rows = [['日付', '金額', 'お店・内容', '分類', '払った人', '共有', '固定費', '種類', '負担の分け方']];
-  [...st.tx].reverse().forEach(t => rows.push([t.date, isIncome(t) ? t.amount : -t.amount, t.shop || '', t.category, C.nameOf(t.paid_by), t.scope === 'shared' ? 'ふたり' : '自分だけ', t.fixed_cost_id ? '○' : '', isIncome(t) ? '収入' : '支出', t.scope === 'shared' && !isIncome(t) ? (splitText(t.split) || '割り勘') + (t.repaid_amount ? `(${t.repaid_amount}円返金済み)` : '') : '']));
+const CSV_HEAD = ['日付', '金額', 'お店・内容', '分類', '払った人', '共有', '固定費', '種類', '負担の分け方'];
+const csvRow = t => [t.date, isIncome(t) ? t.amount : -t.amount, t.shop || '', t.category, C.nameOf(t.paid_by), t.scope === 'shared' ? 'ふたり' : '自分だけ', t.fixed_cost_id ? '○' : '', isIncome(t) ? '収入' : '支出', t.scope === 'shared' && !isIncome(t) ? (splitText(t.split) || '割り勘') + (t.repaid_amount ? `(${t.repaid_amount}円返金済み)` : '') : ''];
+function saveCsv(rows, name) {
   const text = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-  const file = new File([text], `家計簿_${st.kb.month}.csv`, { type: 'text/csv' });
+  const file = new File([text], name, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+}
+export function csv() {
+  const { st } = C;
+  return saveCsv([CSV_HEAD, ...[...st.tx].reverse().map(csvRow)], `家計簿_${st.kb.month}.csv`);
+}
+export function csvYear() {
+  const { st } = C;
+  return saveCsv([CSV_HEAD, ...yearRows().map(csvRow)], `家計簿_${st.kb.year}年_${st.kb.mine ? '自分の分も含む' : 'ふたり'}.csv`);
 }

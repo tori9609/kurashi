@@ -260,9 +260,13 @@ function kbList() {
         : '<button class="btn green" data-act="settle">精算済みにする</button>'}</section>`;
   }
   const days = [...new Set(tx.map(t => t.date))];
-  return `<section class="card" style="padding:12px 16px"><label class="btn green" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
+  const rb = st.rcBusy;
+  return `${rb ? `<section class="card" style="padding:12px 16px" aria-live="polite"><div class="btn green" role="status" aria-busy="true" style="display:flex;align-items:center;justify-content:center;gap:10px;opacity:.85;cursor:default">
+      <span class="spin" aria-hidden="true"></span>${rb.paper ? '紙を読み取り中…' : `取り込み中… ${rb.n}/${rb.total}枚`}</div>
+    <p class="muted hint" style="margin:0;font-size:0.75rem">AIが${rb.paper ? '紙' : 'レシート'}を読み取っています(1枚10秒ほど)。終わると${rb.paper ? '候補の画面が開きます' : '「確認待ち」に入ります'}。ほかの画面に移っても続きます。</p></section>`
+  : `<section class="card" style="padding:12px 16px"><label class="btn green" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
       ${ic('camera')}レシートを読み込む<input id="rcptFile" type="file" accept="image/*" multiple hidden></label>
-    <p class="muted hint" style="margin:0;font-size:0.75rem">撮影するか、写真を何枚か選ぶと、品目ごとに読み取って「確認待ち」に入れます(読み取りはGoogleのGeminiを使います)。</p></section>
+    <p class="muted hint" style="margin:0;font-size:0.75rem">撮影するか、写真を何枚か選ぶと、品目ごとに読み取って「確認待ち」に入れます(読み取りはGoogleのGeminiを使います)。</p></section>`}
   ${billsHtml()}${missesHtml()}${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
     ${inc.length ? `<div class="sum"><div><small>収入(見えている分)</small><b class="plus">+${yen(sumOf(inc))}</b></div><div><small>自分の収支(自分の収入 − 自分が払った分)</small><b class="${bal0 >= 0 ? 'plus' : 'minus'}">${bal0 >= 0 ? '+' : '−'}${yen(Math.abs(bal0))}</b></div></div>` : ''}
     <button class="btn text" data-act="txNewIncome" style="padding:0;min-height:40px;align-self:flex-start">${ic('income')}収入を記録</button>

@@ -323,3 +323,8 @@ html[data-text=xl]{font-size:125%}
 .splitn{display:flex;align-items:center;gap:6px;margin-top:6px}
 .splitn input{flex:1}
 .splitn span{color:var(--sub);font-size:0.875rem}
+
+/* 取り込み中の回る印 */
+.spin{width:18px;height:18px;flex:none;border:2.5px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}

@@ -63,6 +63,8 @@ async function checkShopping(names) {
 // 紙のお知らせ・予約票から予定とやることの候補を読み取る(登録は、確かめてから)
 export async function readPaper(file) {
   if (!file) return;
+  if (C.st.rcBusy) return C.toast('いま取り込み中です。終わってから選んでください');
+  C.st.rcBusy = { paper: true }; if (!C.st.sheet) C.render();
   C.toast('紙を読み取り中…(10秒ほどかかります)');
   try {
     const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: await shrink(file), mime: 'image/jpeg', mode: 'paper' } });
@@ -71,7 +73,7 @@ export async function readPaper(file) {
     if (!data?.paper?.items?.length) throw new Error('予定ややることを読み取れませんでした。受け取り係(receipt-read)が新しい版か確かめてください');
     C.st.sheet = { type: 'paper', form: true, title: data.paper.title, items: data.paper.items };
   } catch (e) { C.st.sheet = { type: 'info', title: '読み取れませんでした', lines: [e.message] }; }
-  C.render();
+  C.st.rcBusy = null; C.render();
 }
 export function paperHtml() {
   const { esc } = C, s = C.st.sheet, o = (v, cur, l) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
@@ -88,9 +90,13 @@ export function paperHtml() {
 }
 export async function readReceipts(files) {
   if (!files.length) return;
+  if (C.st.rcBusy) return toast('いま取り込み中です。終わってから次のレシートを選んでください');
   let ok = 0, merged = 0; const errs = [], bought = [];
+  // 取り込み中の印(家計簿の「レシートを読み込む」のところに、何枚目かと回る印を出す)。入力中の画面は崩さない
+  const busy = v => { C.st.rcBusy = v; if (!C.st.sheet) C.render(); };
+  try {
   for (const [n, f] of files.entries()) {
-    toast(`レシート ${n + 1}/${files.length} を読み取り中…`);
+    busy({ n: n + 1, total: files.length });
     try {
       const img = await shrink(f), path = await savePhoto(img);
       const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: img, mime: 'image/jpeg' } });
@@ -101,6 +107,7 @@ export async function readReceipts(files) {
       ok++; if (data.merged) merged++;
     } catch (e) { errs.push(`${n + 1}枚目:${e.message}`); }
   }
+  } finally { C.st.rcBusy = null; }
   await reloadInbox(); C.render();
   toast(`${ok}枚を読み取りました${merged ? `(${merged}枚はカード利用とまとめました)` : ''}${bought.length ? `。買い物リストの「${bought.slice(0, 3).join('・')}」${bought.length > 3 ? `ほか${bought.length - 3}件` : ''}にチェックを付けました` : ''}${errs.length ? `。読めなかったもの ${errs.length}枚` : ''}`);
   if (errs.length) setTimeout(() => alertBox(errs), 2300);

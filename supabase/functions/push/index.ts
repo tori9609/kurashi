@@ -3,7 +3,7 @@
 // ・アプリからは「通知用の公開鍵をもらう」「テスト通知を送る」に使う。
 // 鍵は初めて動いたときに自分で作り、データベースの push_config に入れる(手で設定するものはない)。
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-export const VERSION = '2026-11-21';   // 状態チェックで「新しい版か」を見るための印
+export const VERSION = '2026-11-23';   // 状態チェックで「新しい版か」を見るための印
 
 const APP = 'https://tori9609.github.io/kurashi/';
 const cors = {

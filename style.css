@@ -328,3 +328,15 @@ html[data-text=xl]{font-size:125%}
 .spin{width:18px;height:18px;flex:none;border:2.5px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+
+/* 入れないといけない欄を目立たせる */
+.reqmark{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--accent);color:var(--on-accent);font-size:0.6875rem;font-weight:700;vertical-align:1px}
+.field.req label,fieldset.chips.req legend{color:var(--ink);font-weight:700;font-size:0.875rem}
+.field.req input{border:1.5px solid var(--accent-text)}
+.field.req input:not(:placeholder-shown){border-color:var(--line)}
+input.big{font-size:1.5rem;font-weight:700;min-height:56px}
+.chipadd{min-height:44px;padding:0 14px;border-radius:999px;border:1px dashed var(--sub);background:transparent;color:var(--accent-text);font-size:0.875rem;font-weight:700}
+.catadd{display:flex;gap:8px;margin-top:-4px}.catadd input{flex:1}.catadd .btn{width:auto;padding:0 18px}
+.sharebox{padding:12px;border-radius:12px;background:var(--accent-soft)}
+.chips .reqmark{display:inline-block;min-height:0;padding:1px 6px;border:0;border-radius:6px;background:var(--accent);color:var(--on-accent);font-size:0.6875rem}
+.sharebox[hidden],.splitn[hidden]{display:none}

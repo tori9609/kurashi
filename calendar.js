@@ -41,7 +41,9 @@ export function viewCalendar() {
     <div class="nav"><button class="iconbtn" data-act="calMove" data-n="-1" aria-label="前の月">${ic('left')}</button><button class="pill" data-act="calMove" data-n="0">今日</button><button class="iconbtn" data-act="calMove" data-n="1" aria-label="次の月">${ic('right')}</button>${addBtn('evNew', '予定を追加')}</div></div>
   <section class="card"><div class="cal">${[0, 1, 2, 3, 4, 5, 6].map(i => (i + ws) % 7).map(d => `<span class="wd${wdClass(d)}">${W[d]}</span>`).join('')}${cells}</div></section>
   <section class="card list"><h2 class="group-title">${md(sel)}の予定</h2>
-    ${list.length ? list.map(evRow).join('') : '<p class="muted" style="margin:0 0 10px">予定はありません</p>'}</section>
+    ${list.length ? list.map(evRow).join('') : '<p class="muted" style="margin:0 0 10px">予定はありません</p>'}
+    <button class="btn text" data-act="evNew">＋ ${md(sel)}に予定を追加</button>
+    <p class="muted hint" style="margin:0 0 8px;font-size:0.75rem">選んでいる日をもう一度押しても追加できます。</p></section>
   <label class="btn icon-left">${ic('doc')}紙のお知らせから予定を作る<input id="paperFile" type="file" accept="image/*" hidden></label>
   <p class="muted hint" style="margin:-4px 4px 0;font-size:0.7812rem">学校や病院のお知らせ・予約票を撮ると、日付と予定を読み取ります。登録の前に確かめられます。</p></main>`;
 }

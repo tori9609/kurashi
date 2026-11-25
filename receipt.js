@@ -1,6 +1,6 @@
 // ふたりの暮らし帳:レシート・紙の読み取り、買い物リストとの連動、消耗品の買い時
 // ---------- レシート ----------
-import { C, CATS, closeBtn, err, field, ic, md, memberOpts, sb, sheetWrap, toast, today, yen } from './core.js';
+import { C, CATS, closeBtn, err, field, h, ic, md, memberOpts, sb, sheetWrap, toast, today, yen } from './core.js';
 import { reloadInbox } from './features.js';
 import { inboxDate } from './kakeibo.js';
 export const catsOf = i => [...new Set((i.items || []).map(x => x.category))];
@@ -68,7 +68,7 @@ export async function readPaper(file) {
   C.toast('紙を読み取り中…(10秒ほどかかります)');
   try {
     const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: await shrink(file), mime: 'image/jpeg', mode: 'paper' } });
-    const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || error?.message;
+    const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || (error && `読み取りの係から返事がありませんでした(${error.context?.status || '番号なし'})。時間切れのことがあります。少しおいて試してください`);
     if (msg) throw new Error(msg);
     if (!data?.paper?.items?.length) throw new Error('予定ややることを読み取れませんでした。受け取り係(receipt-read)が新しい版か確かめてください');
     C.st.sheet = { type: 'paper', form: true, title: data.paper.title, items: data.paper.items };
@@ -91,26 +91,44 @@ export function paperHtml() {
 export async function readReceipts(files) {
   if (!files.length) return;
   if (C.st.rcBusy) return toast('いま取り込み中です。終わってから次のレシートを選んでください');
-  let ok = 0, merged = 0; const errs = [], bought = [];
+  let ok = 0, merged = 0, queued = 0; const errs = [], bought = [];
   // 取り込み中の印(家計簿の「レシートを読み込む」のところに、何枚目かと回る印を出す)。入力中の画面は崩さない
   const busy = v => { C.st.rcBusy = v; if (!C.st.sheet) C.render(); };
   try {
   for (const [n, f] of files.entries()) {
     busy({ n: n + 1, total: files.length });
+    let path = null;
     try {
-      const img = await shrink(f), path = await savePhoto(img);
+      const img = await shrink(f); path = await savePhoto(img);
       const { data, error } = await sb().functions.invoke('receipt-read', { body: { image: img, mime: 'image/jpeg' } });
-      const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || error?.message;
+      const msg = data?.error || (error && (await error.context?.json?.().catch(() => null))?.error) || (error && `読み取りの係から返事がありませんでした(${error.context?.status || '番号なし'})。時間切れのことがあります。少しおいて試してください`);
       if (msg) throw new Error(msg);
       if (path && data?.id) await sb().from('card_inbox').update({ receipt_path: path }).eq('id', data.id);   // 写真を確認待ちに結び付ける
       bought.push(...await checkShopping((data?.receipt?.items || []).map(x => x.name)));
       ok++; if (data.merged) merged++;
-    } catch (e) { errs.push(`${n + 1}枚目:${e.message}`); }
+    } catch (e) {
+      // 混み合い・時間切れなら、写真を「読み取り待ち」に入れて、あとで自動で読み直す
+      if (path && retryable(e.message) && !(await sb().from('receipt_queue').insert({ household_id: h(), path })).error) queued++;
+      else errs.push(`${n + 1}枚目:${e.message}`);
+    }
   }
   } finally { C.st.rcBusy = null; }
   await reloadInbox(); C.render();
-  toast(`${ok}枚を読み取りました${merged ? `(${merged}枚はカード利用とまとめました)` : ''}${bought.length ? `。買い物リストの「${bought.slice(0, 3).join('・')}」${bought.length > 3 ? `ほか${bought.length - 3}件` : ''}にチェックを付けました` : ''}${errs.length ? `。読めなかったもの ${errs.length}枚` : ''}`);
+  toast(`${ok}枚を読み取りました${queued ? `。${queued}枚は混み合いのため「読み取り待ち」にしました(あとで自動で読み直します)` : ''}${merged ? `(${merged}枚はカード利用とまとめました)` : ''}${bought.length ? `。買い物リストの「${bought.slice(0, 3).join('・')}」${bought.length > 3 ? `ほか${bought.length - 3}件` : ''}にチェックを付けました` : ''}${errs.length ? `。読めなかったもの ${errs.length}枚` : ''}`);
   if (errs.length) setTimeout(() => alertBox(errs), 2300);
+}
+// 読み直してよい失敗か(混み合い・時間切れ・無料枠・返事なし)
+const retryable = m => /混み合|返事|時間切れ|無料枠/.test(m || '');
+// 読み取り待ちの「今すぐ読み直す」
+export async function rqRetry(id) {
+  if (C.st.rcBusy) return toast('いま取り込み中です。終わってから試してください');
+  C.st.rcBusy = { n: 1, total: 1 }; if (!C.st.sheet) C.render();
+  try {
+    const { data, error } = await sb().functions.invoke('receipt-read', { body: { mode: 'retry', id } });
+    const msg = data?.error || (error && ((await error.context?.json?.().catch(() => null))?.error || `読み取りの係から返事がありませんでした(${error.context?.status || '番号なし'})`));
+    toast(msg ? `まだ読み取れませんでした:${msg}` : '読み取りました。「確認待ち」に入れました');
+  } finally { C.st.rcBusy = null; }
+  await reloadInbox(); C.render();
 }
 function alertBox(errs) { C.st.sheet = { type: 'info', title: '読み取れなかったレシート', lines: errs }; C.render(); }
 export const infoHtml = () => sheetWrap(C.st.sheet.title, `<p class="muted" style="margin:0">${C.st.sheet.lines.map(C.esc).join('<br>')}</p>

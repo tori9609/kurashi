@@ -40,6 +40,16 @@ function missesHtml() {
       <span class="sub">${when(m.used_at)}・${esc(m.card || 'カード')}・届いた値「${esc(m.amount_raw || '空')}」</span></span>
       <button class="pill" data-act="missRec" data-id="${m.id}">記録する</button><button class="pill" data-act="missDel" data-id="${m.id}" aria-label="消す">消す</button></div>`).join('')}</section>`;
 }
+function queueHtml() {
+  const { st, esc } = C, q = st.rq || []; if (!q.length) return '';
+  const when = d => new Date(d).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return `<section class="card list"><h2 class="group-title">${ic('receipt')}読み取り待ちのレシート(${q.length})</h2>
+    <p class="muted hint" style="margin:0 0 4px;font-size:0.8125rem">AIが混み合っていて読めなかった写真です。写真は保存してあり、時間をおいて自動で読み直します(10分→20分→40分…と間をあけます)。読めたら「確認待ち」に入ります。</p>
+    ${q.map(x => `<div class="row"><span class="main"><span class="name">${when(x.created_at)}に撮ったレシート</span>
+      <span class="sub">${x.status === 'failed' ? '<span style="color:var(--red)">自動の読み直しを止めました</span>' : `次の読み直し ${when(x.next_at)}ごろ`}・${x.tries}回試しました</span>
+      ${x.last_error ? `<span class="sub">${esc(x.last_error.slice(0, 80))}</span>` : ''}</span>
+      <button class="pill" data-act="rqRetry" data-id="${x.id}">今すぐ読む</button><button class="pill" data-act="rqDel" data-id="${x.id}">取り消す</button></div>`).join('')}</section>`;
+}
 function inboxHtml() {
   const { st, esc } = C, ib = st.inbox || [];
   if (!ib.length) return '';
@@ -267,7 +277,7 @@ function kbList() {
   : `<section class="card" style="padding:12px 16px"><label class="btn green" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
       ${ic('camera')}レシートを読み込む<input id="rcptFile" type="file" accept="image/*" multiple hidden></label>
     <p class="muted hint" style="margin:0;font-size:0.75rem">撮影するか、写真を何枚か選ぶと、品目ごとに読み取って「確認待ち」に入れます(読み取りはGoogleのGeminiを使います)。</p></section>`}
-  ${billsHtml()}${missesHtml()}${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
+  ${billsHtml()}${missesHtml()}${queueHtml()}${inboxHtml()}<section class="card"><div class="sum"><div><small>ふたりの支出</small><b>${yen(total)}</b></div><div><small>自分だけの支出</small><b>${yen(priv)}</b></div></div>
     ${inc.length ? `<div class="sum"><div><small>収入(見えている分)</small><b class="plus">+${yen(sumOf(inc))}</b></div><div><small>自分の収支(自分の収入 − 自分が払った分)</small><b class="${bal0 >= 0 ? 'plus' : 'minus'}">${bal0 >= 0 ? '+' : '−'}${yen(Math.abs(bal0))}</b></div></div>` : ''}
     <button class="btn text" data-act="txNewIncome" style="padding:0;min-height:40px;align-self:flex-start">${ic('income')}収入を記録</button>
     ${byCat.map(x => `<div class="bar"><span>${x.c}${x.sp ? `<small class="muted">(${esc(x.sp)})</small>` : ''}</span><span>${yen(x.spent)}${x.budget ? ' / ' + yen(x.budget) : ''}</span>
@@ -282,24 +292,30 @@ function kbList() {
     ${tx.length ? '<button class="btn text" data-act="csv">この月をCSVで書き出す</button>' : ''}</section>
 `;
 }
+// 入れないといけない欄(ラベルに「必須」をつけて目立たせる)
+const reqField = (id, label, inner) => `<div class="field req"><label for="${id}">${label}<span class="reqmark">必須</span></label>${inner}</div>`;
 export function txFormHtml() {
   const { st, esc } = C, s = st.sheet, t = s.edit ? (st.tx || []).find(x => x.id === s.edit) : null;
   const kind = s.kind || (t ? t.kind || 'expense' : 'expense'), inc = kind === 'income', cats = inc ? INCOME_CATS : CATS;
   const def = cats.includes(s.cat) ? s.cat : inc ? '給与' : '食費';
   const date = s.date || (st.kb.month === thisMonth() ? today() : st.kb.month + '-01');
-  const mine = !t || t.owner === st.me.user_id, scope = s.scope || (inc ? 'private' : 'shared');   // 収入は、初めは自分だけ
+  const mine = !t || t.owner === st.me.user_id, scope = s.scope || t?.scope || (inc ? 'private' : 'shared');   // 収入は、初めは自分だけ
   const sc = (v, l) => `<option value="${v}" ${v === scope ? 'selected' : ''}>${l}</option>`;
   const kd = (v, l) => `<button type="button" class="${kind === v ? 'on' : ''}" data-act="txKind" data-v="${v}" aria-pressed="${kind === v}">${l}</button>`;
   return sheetWrap(t ? '記録を直す' : s.inbox ? 'カード利用を家計簿に記録' : inc ? '収入を記録' : '支出を記録', `<form class="stack" data-form="tx" novalidate>
     ${s.inbox ? '' : `<div class="seg two-seg" role="group" aria-label="支出か収入か">${kd('expense', '支出')}${kd('income', '収入')}</div>`}
+    ${s.inbox ? `<p class="muted" style="margin:0">${esc(s.card || 'カード')}で払った分です。</p>` : ''}
+    ${reqField('txAmt', '金額(円)', `<input id="txAmt" class="big" type="text" inputmode="numeric" maxlength="9" placeholder="例:1280" value="${s.amt || ''}" required>`)}
+    <fieldset class="chips req"><legend>分類<span class="reqmark">必須</span></legend>${cats.map(c => `<label><input type="radio" name="cat" value="${esc(c)}" ${c === def ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}
+      ${s.catAdd ? '' : `<button type="button" class="chipadd" data-act="catAddOpen">＋ 分類を足す</button>`}</fieldset>
+    ${s.catAdd ? `<div class="catadd"><input id="txNewCat" type="text" maxlength="12" placeholder="例:ペット" aria-label="足す分類の名前"><button type="button" class="btn" data-act="catAdd">足す</button></div>
+      <p class="muted hint" style="margin:-6px 0 0;font-size:0.8125rem">足した分類はふたりの一覧に入ります。外すときは「予算」のいちばん下から。</p>` : ''}
     ${mine ? field('txScope', '見せる範囲', `<select id="txScope">${inc ? sc('private', '自分だけ(相手には見えません)') + sc('shared', 'ふたりに見せる') : sc('shared', 'ふたりの支出(精算の対象)') + sc('private', '自分だけ(相手には見えません)')}</select>`)
       : `<p class="muted hint" style="margin:0;font-size:0.8125rem">相手が記録した${inc ? '収入' : '支出'}なので、見せる範囲は相手だけが変えられます。</p>`}
-    ${inc ? '' : field('txSplit', '負担の分け方(ふたりの支出のとき)', t ? splitField('txSplit', t.split || 'equal') : splitField('txSplit', s.split ?? '', { blank: '分類のめやすどおり(決めていなければ割り勘)' }))}
-    ${inc ? '' : field('txRepaid', '払った人が、その場で返してもらった額(円・なくてもよい)', `<input id="txRepaid" type="text" inputmode="numeric" maxlength="9" placeholder="例:820" value="${t?.repaid_amount || ''}">`)}
-    ${s.inbox ? `<p class="muted" style="margin:0">${esc(s.card || 'カード')}で払った分です。</p>` : ''}
-    ${field('txAmt', '金額(円)', `<input id="txAmt" type="text" inputmode="numeric" maxlength="9" placeholder="例：1280" value="${s.amt || ''}">`)}
-    <fieldset class="chips"><legend>分類</legend>${cats.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === def ? 'checked' : ''}><span>${c}</span></label>`).join('')}</fieldset>
-    ${field('txShop', inc ? '入ってきた先・内容(なくてもよい)' : 'お店・内容(なくてもよい)', `<input id="txShop" type="text" maxlength="40" placeholder="${inc ? '例:会社、証券会社' : '例：スーパー'}" value="${esc(s.shop || '')}">`)}
+    ${inc ? '' : `<div class="stack sharebox" id="txShareBox" ${scope === 'shared' ? '' : 'hidden'}>
+      ${field('txSplit', '負担の分け方', s.split !== undefined ? splitField('txSplit', s.split, t ? {} : { blank: '分類のめやすどおり(決めていなければ割り勘)' }) : t ? splitField('txSplit', t.split || 'equal') : splitField('txSplit', '', { blank: '分類のめやすどおり(決めていなければ割り勘)' }))}
+      ${field('txRepaid', '払った人が、その場で返してもらった額(円・なくてもよい)', `<input id="txRepaid" type="text" inputmode="numeric" maxlength="9" placeholder="例:820" value="${s.repaid ?? t?.repaid_amount ?? ''}">`)}</div>`}
+    ${field('txShop', inc ? '入ってきた先・内容(なくてもよい)' : 'お店・内容(なくてもよい)', `<input id="txShop" type="text" maxlength="40" placeholder="${inc ? '例:会社、証券会社' : '例:スーパー'}" value="${esc(s.shop || '')}">`)}
     <div class="two">${field('txDate', '日付', `<input id="txDate" type="date" value="${date}">`)}${field('txWho', inc ? '受け取った人' : '払った人', `<select id="txWho">${memberOpts(s.who || st.me.user_id)}</select>`)}</div>
     ${inc ? '<p class="muted hint" style="margin:0;font-size:0.8125rem">収入は、ふたりの支出・精算・予算には入りません。</p>' : ''}
     <p class="err" id="err" hidden></p>
@@ -399,7 +415,16 @@ function kbBudget() {
     ${CATS.map((c, i) => `<div class="brow"><label for="bg${i}">${c}</label><input id="bg${i}" type="text" inputmode="numeric" maxlength="9" placeholder="なし" value="${bOf(c).amount || ''}"></div>
       <div class="brow bsp"><span></span><div>${splitField('bs' + i, bOf(c).split || 'equal', { budget: true })}</div></div>`).join('')}
     ${estHtml}
-    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">保存する</button><p class="muted hint" style="margin:0;font-size:0.8125rem">空にすると、その分類の予算はなしになります。下の欄は「だれが持つか」のめやすで、その分類の支出を記録するときの初めの負担の分け方になります(記録ごとに変えられます)。</p></form>`;
+    <p class="err" id="err" hidden></p><button class="btn primary" type="submit">保存する</button><p class="muted hint" style="margin:0;font-size:0.8125rem">空にすると、その分類の予算はなしになります。下の欄は「だれが持つか」のめやすで、その分類の支出を記録するときの初めの負担の分け方になります(記録ごとに変えられます)。</p></form>
+  ${catListHtml()}`;
+}
+// 自分で足した分類の一覧(外せる)
+function catListHtml() {
+  const { st, esc } = C, mine = st.customCats || [];
+  return `<section class="card stack"><h2>自分で足した分類</h2>
+    ${mine.length ? mine.map(c => `<div class="brow"><span>${esc(c.name)}${c.kind === 'income' ? '(収入)' : ''}</span><button class="btn ${st.catDelConfirm === c.name ? 'danger' : 'text'}" data-act="catDel" data-v="${esc(c.name)}">${st.catDelConfirm === c.name ? 'もう一度押すと外します' : '一覧から外す'}</button></div>`).join('')
+      : '<p class="muted" style="margin:0">まだありません。記録の画面の「＋ 分類を足す」から足せます。</p>'}
+    <p class="muted hint" style="margin:0;font-size:0.8125rem">外しても、これまでの記録の分類はそのまま残ります。</p></section>`;
 }
 function kbGoals() {
   const { st, esc } = C;

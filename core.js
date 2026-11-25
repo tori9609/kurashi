@@ -55,7 +55,9 @@ export const W = '日月火水木金土';
 export const WS_KEY = 'kurashi.weekStart';
 export const weekStart = () => { try { return localStorage.getItem(WS_KEY) === '1' ? 1 : 0; } catch { return 0; } };
 export const wdClass = d => d === 0 ? ' sun' : d === 6 ? ' sat' : '';
-export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', 'その他'];
+export const BASE_CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', '美容', '医療', 'その他'];
+// 分類の一覧。自分で足した分類(categories 表)を読み込むと、「その他」の前に入る(配列そのものを入れ替えるので、どのファイルからも同じ一覧が見える)
+export const CATS = [...BASE_CATS];
 export const SHARED_COLOR = '#1F8A5B';
 export const yen = n => '¥' + Math.round(n).toLocaleString('ja-JP');
 export const dt = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };

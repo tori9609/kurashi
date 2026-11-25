@@ -161,7 +161,7 @@ export function backupSettingsHtml() {
 
 // ---------- 設定:状態チェック(準備ができているかをまとめて見る) ----------
 export const APP_VERSION = '2026-11-21';   // アプリの版(GitHubに上げた版が届いているかの目安)
-export const NEED = { schema: 19, fn: '2026-11-23' };
+export const NEED = { schema: 25, fn: '2026-11-23' };
 export async function runStatus() {
   const st = C.st, inv = async (name, body) => { try { const r = await sb().functions.invoke(name, { body }); return r.error ? { err: r.error.message || 'error' } : r.data || {}; } catch (e) { return { err: e.message }; } };
   const [db, push, rr] = await Promise.all([sb().rpc('app_status').then(r => r.error ? { err: r.error.message } : r.data || {}), inv('push', { action: 'version' }), inv('receipt-read', { mode: 'version' })]);
@@ -205,12 +205,15 @@ export function statusSettingsHtml() {
 // ---------- 設定:ホーム画面のウィジェット(Scriptable) ----------
 export function widgetSettingsHtml() {
   const { st } = C, ready = st.widgetKey && st.widgetSrc;
+  const ms = st.me.month_start || 1, o = n => `<option value="${n}" ${n === ms ? 'selected' : ''}>${n}日</option>`;
   return `<section class="card stack"><h2>ホーム画面のウィジェット</h2>
+    <label class="field"><span>月の区切り(始まりの日)</span><select id="wgMonthStart">${Array.from({ length: 28 }, (_, i) => o(i + 1)).join('')}</select>
+      <span class="muted hint" style="font-size:0.8125rem">${ms === 1 ? '今は1日〜月末です。' : `今は毎月${ms}日〜翌月${ms - 1}日です。`}給料日に合わせるときは、その日を選んでください。ウィジェットの「収支」と「ふたりの支出」がこの区切りで数えられます。</span></label>
     <p class="muted hint" style="margin:0;font-size:0.8125rem">予定と買い物リストを、iPhoneのホーム画面やロック画面に出します。無料アプリ「Scriptable」を使います。ウィジェット用の鍵は「読むだけ」で、これでは何も書き換えられません。</p>
     ${ready ? `<button class="btn primary" data-act="widgetCopy">スクリプトをコピー(鍵入り)</button>
       <ol class="steps"><li>App Storeで「Scriptable」を入れて開く</li><li>右上の「＋」→ 中身を全部消して貼り付け</li><li>上の題名を「暮らし帳」にして「Done」</li>
       <li>ホーム画面を長押し →「編集」→「ウィジェットを追加」→ Scriptable → 大きさを選ぶ</li><li>置いたウィジェットを長押し →「ウィジェットを編集」→ Script で「暮らし帳」を選ぶ</li></ol>
-      <p class="muted hint" style="margin:0;font-size:0.8125rem">Parameter に「予定」または「買い物」と書くと、片方だけを大きく出します。表示はおよそ15分ごとに新しくなります(間隔はiPhoneが決めます)。</p>
+      <p class="muted hint" style="margin:0;font-size:0.8125rem">Parameter に「予定」「買い物」「お金」のどれかを書くと、それだけを大きく出します(「お金」は今月の収支)。表示はおよそ15分ごとに新しくなります(間隔はiPhoneが決めます)。</p>
       <button class="btn" data-act="widgetKeyRenew">鍵を作り直す(古いウィジェットは表示されなくなります)</button>`
       : '<button class="btn primary" data-act="widgetKey">ウィジェットの準備をする</button>'}</section>`;
 }
@@ -233,4 +236,10 @@ export function cardSettingsHtml() {
     ${k ? box('① 送り先のURL', url) + box('② apikey(公開用の鍵)', C.key) + box('③ あなたの取り込み用の鍵(p_token)', k)
         + '<button class="btn" data-act="cardKeyRenew">鍵を作り直す(古い鍵は使えなくなります)</button>'
         : '<button class="btn primary" data-act="cardKey">設定に使う情報を表示する</button>'}</section>`;
+}
+// 月の区切り(始まりの日)を変える
+export async function setMonthStart(n) {
+  const r = await sb().rpc('set_month_start', { p_day: n });
+  if (r.error) return C.toast(r.error.message.includes('set_month_start') ? 'SQLの追加分25がまだのようです。GitHubへのアップロードを確かめてください' : r.error.message);
+  C.st.me.month_start = n; C.toast(n === 1 ? '月の区切りを1日〜月末にしました' : `月の区切りを毎月${n}日〜翌月${n - 1}日にしました`); C.render();
 }

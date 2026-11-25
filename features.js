@@ -1,10 +1,10 @@
 // ふたりの暮らし帳 第2段階(予定・家事)と第3段階(家計簿)。2026-11-20
 // app.js から道具(st・sb・run など)を受け取って動く。画面は文字列で作り、app.js の render() が表示する。
 import { evFormHtml, evSheetHtml } from './calendar.js';
-import { C, CATS, W, WS_KEY, activity, applyTheme, chk, closeBtn, dt, edge, err, field, h, ic, ls, md, memberOpts, pad, route, sb, sheetWrap, thisMonth, toNum, toast, today, val, who, yen, ymd } from './core.js';
+import { BASE_CATS, C, CATS, W, WS_KEY, activity, applyTheme, chk, closeBtn, dt, edge, err, field, h, ic, ls, md, memberOpts, pad, route, sb, sheetWrap, thisMonth, toNum, toast, today, val, who, yen, ymd } from './core.js';
 import { DL_KINDS, addYears, bulkHtml, confirmHtml, csv, csvYear, deadlineHtml, fixSheetHtml, goalAddHtml, guessCat, inboxDate, monthLabel, quickHtml, readSplit, settle, shiftMonth, txFormHtml, txSheetHtml } from './kakeibo.js';
-import { infoHtml, paperHtml, rcptHtml, readPaper, readReceipts, splitByCategory } from './receipt.js';
-import { doSearch, has, loadWidget, pushOff, pushOn, runStatus, widgetScript } from './settings.js';
+import { infoHtml, paperHtml, rcptHtml, readPaper, readReceipts, rqRetry, splitByCategory } from './receipt.js';
+import { doSearch, has, loadWidget, pushOff, pushOn, runStatus, setMonthStart, widgetScript } from './settings.js';
 export * from './core.js';
 export * from './settings.js';
 export * from './calendar.js';
@@ -12,11 +12,12 @@ export * from './kakeibo.js';
 export * from './receipt.js';
 export function setup(ctx) {
   Object.assign(C, ctx);   // 道具は core.js の C に入れて、ほかのファイルからも使う
-  document.addEventListener('change', e => { if (e.target.id === 'rcptFile') readReceipts([...e.target.files]); if (e.target.id === 'paperFile') readPaper(e.target.files[0]);
+  document.addEventListener('change', e => { if (e.target.id === 'rcptFile') readReceipts([...e.target.files]); if (e.target.id === 'paperFile') readPaper(e.target.files[0]); if (e.target.id === 'wgMonthStart') setMonthStart(Number(e.target.value));
     if (e.target.dataset?.split) { const id = e.target.dataset.split, v = e.target.value, box = document.getElementById(id + 'Box'), u = document.getElementById(id + 'U'), n = document.getElementById(id + 'N');
       if (box) box.hidden = !/^[pa]:/.test(v); if (u) u.textContent = v.startsWith('a:') ? '円' : '%'; if (n) n.placeholder = v.startsWith('a:') ? '例:820' : '例:70'; }
+    if (e.target.id === 'txScope') { const b = document.getElementById('txShareBox'); if (b) b.hidden = e.target.value !== 'shared'; }
     if (e.target.dataset?.cyc) { const m = document.getElementById(e.target.dataset.cyc + 'Mon'); if (m) m.disabled = e.target.value !== 'yearly'; } });
-  // カレンダーを左右にスワイプ:左へ=前の月(年)、右へ=次の月(年)
+  // カレンダーを左右にスワイプ:左へはらう=次の月(年)、右へはらう=前の月(年)。ページをめくる向き(iPhoneのカレンダーと同じ)
   let sx = 0, sy = 0, on = null;
   document.addEventListener('touchstart', e => {
     const t = e.target.closest?.('.cal, .ygrid'); on = t ? (t.classList.contains('cal') ? 'm' : 'y') : null;
@@ -26,7 +27,7 @@ export function setup(ctx) {
     if (!on) return; const kind = on; on = null;
     const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const n = dx < 0 ? -1 : 1;
+    const n = dx < 0 ? 1 : -1;
     if (kind === 'm') calShift(n); else C.st.cal.yy += n;
     C.render();
   }, { passive: true });
@@ -51,6 +52,8 @@ export async function loadFeatures() {
   Object.assign(st, { events: ev, chores: ch, fixed: fx, budgets: bu, goals: go, settles: se });
   const sc = await sb().from('shop_categories').select('*');   // 覚えたお店の分類(本人の分だけ。まだ表がなくても動く)
   st.shopCats = sc.error ? [] : sc.data || [];
+  const cc = await sb().from('categories').select('*').eq('household_id', h()).order('created_at');   // 自分で足した分類(まだ表がなくても動く)
+  st.customCats = cc.error ? [] : cc.data || []; applyCustomCats(st.customCats);
   initState();
   await loadTx(true); await reloadInbox();
 }
@@ -74,6 +77,9 @@ export async function reloadInbox() {
   const bl = await sb().from('card_bills').select('*').gte('pay_date', since).order('pay_date');
   C.st.bills = bl.error ? [] : bl.data || [];
   C.st.misses = m.error ? [] : m.data || [];
+  // レシートの読み取り待ち(本人だけ。SQL 追加分24の前は空)
+  const q = await sb().from('receipt_queue').select('*').order('created_at');
+  C.st.rq = q.error ? [] : q.data || [];
 }
 // 固定費とカード利用の突き合わせ:
 // 「記録する」固定費(自分が払う)と同じ金額のカード利用が、その固定費を記録済みの月に来たら、
@@ -172,8 +178,24 @@ export function choreDue(c, ds = today()) {
   if (c.weekdays) return c.weekdays.split(',').map(Number).includes(dt(ds).getDay());
   return days >= 7;
 }
-export const INCOME_CATS = ['給与', '投資', '臨時収入', 'その他の収入'];
+export const BASE_INCOME_CATS = ['給与', '投資', '臨時収入', 'その他の収入'];
+export const INCOME_CATS = [...BASE_INCOME_CATS];
+// 自分で足した分類を一覧に入れる(基本の分類の「その他」の前に、足した順で並べる)
+export function applyCustomCats(rows) {
+  const put = (arr, base, extra) => { const last = base[base.length - 1]; arr.splice(0, arr.length, ...base.slice(0, -1), ...extra.filter(x => !base.includes(x)), last); };
+  put(CATS, BASE_CATS, rows.filter(r => r.kind !== 'income').map(r => r.name));
+  put(INCOME_CATS, BASE_INCOME_CATS, rows.filter(r => r.kind === 'income').map(r => r.name));
+}
 export const isIncome = t => t?.kind === 'income';
+// 記録の入力欄の中身を控える(画面を描き直しても消えないように)
+function keepTx() {
+  const g = id => document.getElementById(id), o = { amt: val('txAmt'), shop: val('txShop'), date: val('txDate'), who: val('txWho') };
+  const c = document.querySelector('input[name=cat]:checked')?.value; if (c) o.cat = c;
+  if (g('txScope')) o.scope = val('txScope');
+  if (g('txSplit')) { const r = readSplit('txSplit'); o.split = r.err ? '' : r.split ?? ''; }
+  if (g('txRepaid')) o.repaid = val('txRepaid');
+  return o;
+}
 export const TODO_CATS = ['家事', '用事・手続き', '買い物', '仕事', 'お金', '健康', 'その他'];
 export const freqText = c => ({ daily: '毎日', monthly: '月1回', once: '1回だけ' }[c.freq] || (c.weekdays ? '毎週' + c.weekdays.split(',').map(n => W[n]).join('・') : '週1回'));
 const isFinished = c => c.archived || (c.freq === 'once' && c.last_done && c.last_done !== today());
@@ -333,7 +355,7 @@ export async function onSubmit(f) {
     const editId = st.sheet?.edit, old = editId && st.tx.find(x => x.id === editId);
     const scope = document.getElementById('txScope') ? val('txScope') : old.scope, shop = val('txShop') || null;
     const kind = INCOME_CATS.includes(category) ? 'income' : 'expense', ib0 = st.sheet?.inbox && st.inbox.find(x => x.id === st.sheet.inbox);
-    const sr = document.getElementById('txSplit') ? readSplit('txSplit', amount) : { split: old?.split ?? null }; if (sr.err) return err(sr.err);
+    const sr = document.getElementById('txSplit') && scope === 'shared' ? readSplit('txSplit', amount) : { split: old?.split ?? null }; if (sr.err) return err(sr.err);
     const split = scope === 'shared' && kind !== 'income' ? sr.split : null, repaid_amount = kind !== 'income' && scope === 'shared' ? toNum(val('txRepaid')) || null : null;
     if (repaid_amount && repaid_amount > amount) return err('返してもらった額が支払いの金額より大きくなっています');
     if (split === 'deal' && !repaid_amount) return err('「返してもらった額で済ませる」のときは、返してもらった額を入れてください(0円なら払った人のおごりを選んでください)');
@@ -414,7 +436,9 @@ export async function onSubmit(f) {
 export async function onClick(act, el) {
   const { st, run } = C, me = st.me, id = el.dataset.id;
   switch (act) {
-    case 'calDay': { const [y, m] = el.dataset.d.split('-').map(Number); st.cal = { y, m: m - 1, sel: el.dataset.d }; C.render(); return true; }
+    case 'calDay': {   // 1回目で日を選ぶ。選んでいる日をもう一度押すと、その日の予定を追加
+      if (st.cal.sel === el.dataset.d && st.cal.view !== 'year') { openSheet({ type: 'evNew' }); return true; }
+      const [y, m] = el.dataset.d.split('-').map(Number); st.cal = { y, m: m - 1, sel: el.dataset.d }; C.render(); return true; }
     case 'calWeek': try { localStorage.setItem(WS_KEY, el.dataset.v); } catch {} C.toast(el.dataset.v === '1' ? 'カレンダーを月曜始まりにしました' : 'カレンダーを日曜始まりにしました'); C.render(); return true;
     case 'calYear': if (st.cal.view === 'year') st.cal.view = null; else { st.cal.view = 'year'; st.cal.yy = st.cal.y; } C.render(); window.scrollTo(0, 0); return true;
     case 'calYearMove': { const n = Number(el.dataset.n); st.cal.yy = n ? st.cal.yy + n : new Date().getFullYear(); C.render(); return true; }
@@ -499,8 +523,27 @@ export async function onClick(act, el) {
         date: tx ? addYears(src.date, 1) : addYears(today(), 1), scope: src.scope === 'private' ? 'private' : 'shared' };
       C.render(); return true;
     }
+    case 'catAddOpen': Object.assign(st.sheet, keepTx(), { catAdd: true }); C.render(); document.getElementById('txNewCat')?.focus(); return true;
+    case 'catAdd': {   // 分類を足す(ふたりで同じ一覧を使う)
+      const name = val('txNewCat').replace(/\s+/g, ' '), inc = (st.sheet.kind || 'expense') === 'income';
+      if (!name) return err('足す分類の名前を入れてください');
+      if (name.length > 12) return err('分類の名前は12文字までにしてください');
+      if (CATS.includes(name) || INCOME_CATS.includes(name)) return err(`「${name}」はもうあります`);
+      const r = await sb().from('categories').insert({ household_id: h(), name, kind: inc ? 'income' : 'expense' });
+      if (r.error) return err('分類を足せませんでした(データベースの更新がまだかもしれません)');
+      Object.assign(st.sheet, keepTx(), { cat: name, catAdd: false });
+      const cc = await sb().from('categories').select('*').eq('household_id', h()).order('created_at');
+      st.customCats = cc.data || []; applyCustomCats(st.customCats); toast(`分類「${name}」を足しました`); C.render(); return true;
+    }
+    case 'catDel': {   // 足した分類を一覧から外す(これまでの記録の分類はそのまま)
+      if (st.catDelConfirm !== el.dataset.v) { st.catDelConfirm = el.dataset.v; C.render(); return true; }
+      st.catDelConfirm = null;
+      await run(sb().from('categories').delete().eq('household_id', h()).eq('name', el.dataset.v), `分類「${el.dataset.v}」を一覧から外しました`);
+      const cc = await sb().from('categories').select('*').eq('household_id', h()).order('created_at');
+      st.customCats = cc.data || []; applyCustomCats(st.customCats); C.render(); return true;
+    }
     case 'txKind': {   // 支出と収入の切り替え(入力中の金額・内容・日付は残す)
-      const s = st.sheet; Object.assign(s, { amt: val('txAmt'), shop: val('txShop'), date: val('txDate'), who: val('txWho'), kind: el.dataset.v, scope: undefined, cat: undefined });
+      const s = st.sheet; Object.assign(s, keepTx(), { kind: el.dataset.v, scope: undefined, cat: undefined, catAdd: false });
       C.render(); return true;
     }
     case 'photoShow': {
@@ -519,6 +562,8 @@ export async function onClick(act, el) {
     case 'unsettle': await run(sb().from('settlements').delete().eq('household_id', h()).eq('month', st.kb.month), '取り消しました'); await loadFeatures(); C.render(); return true;
     case 'csv': csv(); return true;
     case 'csvYear': csvYear(); return true;
+    case 'rqRetry': await rqRetry(el.dataset.id); return true;
+    case 'rqDel': await run(sb().from('receipt_queue').delete().eq('id', el.dataset.id), '読み取り待ちを取り消しました'); await reloadInbox(); C.render(); return true;
     case 'inboxOpen': { const i = st.inbox.find(x => x.id === id); if (!i) return true;
       if (i.items?.length) { st.sheet = { type: 'rcpt', id, form: true, inbox: id }; C.render(); return true; }
       openSheet({ type: 'txNew', inbox: id, amt: i.amount, shop: i.merchant || '', date: inboxDate(i), cat: catFor(i), card: i.card }); return true; }

@@ -8,6 +8,7 @@ const APIKEY = "__APIKEY__";      // 公開用の鍵
 const WEEK_START = __WS__;        // 0 = 日曜始まり、1 = 月曜始まり(アプリの設定から入ります)
 const APP = "https://tori9609.github.io/kurashi/";
 const SHOW_PRIVATE = false;       // true にすると「自分だけ」の予定・やることも出す(ロック画面で人に見える点に注意)
+const SHOW_BALANCE = true;        // false にすると「収支」(自分の収入と払った分)を出さず、ふたりの支出だけにする
 
 // ---------- 色と文字 ----------
 const C = {   // 暮らし帳と同じ色(基本の色＝藍紫、緑＝ふたり、赤＝急ぎ・超過・日曜、青＝土曜)
@@ -146,16 +147,38 @@ function miniCal(stack, d, width, lines) {
     }
   }
 }
-// 今月のお金(ふたりの支出と、1日あたりあと使える額)
+// 今月のお金:自分の収支(自分の収入 − 自分が払った分)を大きく、ふたりの支出と1日あたりあと使える額を小さく
+const rng = d => d.from ? `${D(d.from).getMonth() + 1}/${D(d.from).getDate()}〜${D(d.to).getMonth() + 1}/${D(d.to).getDate()}` : "今月";
+const sign = n => `${n >= 0 ? "+" : "−"}${yen(Math.abs(n))}`;
+function perDay(d) {   // あと使える額:予算 − 使った分 − これから払う固定費 を、今日を含む残りの日数で割る
+  if (!d.budget) return null;
+  const rest = d.budget - d.spent - (d.upcoming || 0), left = d.days_left || 1;
+  return rest >= 0 ? { s: `1日 ${yen(Math.floor(rest / left))}(あと${left}日)`, ok: true } : { s: `予算超え ${yen(-rest)}`, ok: false };
+}
 function money(stack, d, size) {
-  const r = row(stack);
-  text(r, `💴 今月のふたりの支出 ${yen(d.spent)}`, size, { color: C.sub });
-  if (d.budget) {
-    r.addSpacer();
-    // あと使える額:予算 − 使った分 − これから払う固定費 を、今日を含む残りの日数で割る
-    const rest = d.budget - d.spent - (d.upcoming || 0), left = d.days_left || 1;
-    text(r, rest >= 0 ? `1日 ${yen(Math.floor(rest / left))}(あと${left}日)` : `予算超え ${yen(-rest)}`, size, { bold: true, color: rest >= 0 ? C.shared : C.red });
+  const bal = (d.income || 0) - (d.paid || 0), showBal = SHOW_BALANCE && d.income !== undefined, pd = perDay(d);
+  const r1 = row(stack);
+  if (showBal) {
+    text(r1, `💴 ${rng(d)} の収支`, size, { color: C.sub }); r1.addSpacer();
+    text(r1, sign(bal), size + 1, { bold: true, color: bal >= 0 ? C.shared : C.red });
+  } else text(r1, `💴 ${rng(d)} ふたりの支出 ${yen(d.spent)}`, size, { color: C.sub });
+  const r2 = row(stack);
+  text(r2, showBal ? `収入 ${yen(d.income || 0)}・払った ${yen(d.paid || 0)}` : "", size - 1, { color: C.sub }); r2.addSpacer();
+  if (pd) text(r2, pd.s, size - 1, { bold: true, color: pd.ok ? C.shared : C.red });
+  else if (showBal) text(r2, `ふたり ${yen(d.spent)}`, size - 1, { color: C.sub });
+}
+// Parameter に「お金」と書いたときの、お金だけの表示
+function moneyBig(stack, d, small) {
+  const bal = (d.income || 0) - (d.paid || 0), pd = perDay(d);
+  text(stack, `💴 ${rng(d)}`, small ? 11 : 13, { color: C.sub });
+  if (SHOW_BALANCE) {
+    text(stack, "収支", small ? 11 : 12, { color: C.sub });
+    text(stack, sign(bal), small ? 24 : 30, { bold: true, color: bal >= 0 ? C.shared : C.red });
+    text(stack, `収入 ${yen(d.income || 0)}`, small ? 11 : 13);
+    text(stack, `払った ${yen(d.paid || 0)}`, small ? 11 : 13);
   }
+  text(stack, `ふたりの支出 ${yen(d.spent)}`, small ? 11 : 13, { color: SHOW_BALANCE ? C.sub : C.ink, bold: !SHOW_BALANCE });
+  if (pd) text(stack, pd.s, small ? 11 : 13, { bold: true, color: pd.ok ? C.shared : C.red });
 }
 function header(w, d, stale, compact) {
   const h = row(w);
@@ -197,6 +220,13 @@ async function build(family, param) {
     w.url = APP + (shop ? "#shopping" : "#chores"); return w;
   }
   if (family === "accessoryRectangular") {
+    if (want === "お金") {
+      const bal = (d.income || 0) - (d.paid || 0);
+      text(w, `💴 ${rng(d)}`, 11, { bold: true });
+      text(w, SHOW_BALANCE ? `収支 ${sign(bal)}` : `ふたり ${yen(d.spent)}`, 14, { bold: true });
+      text(w, SHOW_BALANCE ? `ふたり ${yen(d.spent)}` : (perDay(d)?.s || ""), 11);
+      w.url = APP + "#kakeibo"; return w;
+    }
     if (next) { text(w, `${dayLabel(next.date, d.today)} ${next.time || "終日"}`, 11, { bold: true }); text(w, next.title, 13); }
     else text(w, "予定はありません", 13);
     text(w, `✅${left}  🛒${d.shopping.length}${urgent ? `(急ぎ${urgent})` : ""}`, 11);
@@ -211,6 +241,7 @@ async function build(family, param) {
     if (big) { miniCal(col(w, "#calendar"), d, 300, 3); w.addSpacer(6); upcoming(col(w, "#calendar"), d, 2, 12); }
     else upcoming(col(w, "#calendar"), d, family === "small" ? 4 : 5, 13, family !== "small");
     w.url = APP + "#calendar";
+  } else if (want === "お金") { moneyBig(col(w, "#kakeibo"), d, family === "small"); w.url = APP + "#kakeibo";
   } else if (want === "やること") { todos(col(w, "#chores"), d, big ? 14 : 5, 13); w.url = APP + "#chores"; }
   else if (want === "買い物") { shopping(col(w, "#shopping"), d, big ? 14 : 5, 13); w.url = APP + "#shopping"; }
   else if (family === "small") {

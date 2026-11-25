@@ -12,7 +12,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 export const VERSION = '2026-11-23';   // 状態チェックで「新しい版か」を見るための印
 
-export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', 'その他'];
+export const CATS = ['住居', '食費', '外食', '日用品', '家具・家電', '光熱費', '通信', '交通', '趣味', '美容', '医療', 'その他'];
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -31,7 +31,7 @@ export const PROMPT = `この画像は日本のお店のレシートです。次
 - items:商品ごとに name(商品名。略語は分かる範囲で読みやすく)、price(その商品に払った税込の金額。数量があれば数量分の合計。値引き・割引はその商品から引く)、category(次から1つ:${CATS.join('、')})
 - 小計・合計・消費税・お預り・お釣り・ポイント・クーポンの行は items に入れない
 - 外税のレシートは、消費税を各商品に割り振って税込にする。items の price の合計が total になるようにする
-- 分類の目安:食べ物・飲み物(スーパー・コンビニ)は食費、店で食べたものは外食、洗剤・ティッシュ・薬・化粧品は日用品、家電・家具・照明は家具・家電、ガソリン・駐車・電車は交通`;
+- 分類の目安:食べ物・飲み物(スーパー・コンビニ)は食費、店で食べたものは外食、洗剤・ティッシュは日用品、化粧品・美容院は美容、薬・病院は医療、家電・家具・照明は家具・家電、ガソリン・駐車・電車は交通`;
 
 const SCHEMA = {
   type: 'OBJECT',
@@ -100,10 +100,10 @@ export function normalizePaper(r: any) {
   return { title: String(r?.title || '').slice(0, 60), items };
 }
 
-// Gemini を呼ぶ。混み合い(500・502・503・504)のときは少し待って最大3回やり直し、だめなら次のモデルを試す
-// モデルが見つからない(404)ときも次を試す。無料枠の上限(429)はやり直しても無駄なので、すぐ知らせる
+// Gemini を呼ぶ。混み合い(500・502・503・504)や返事の遅れのときは、次のモデルへ切り替えて試す(同じモデルは2回まで)
+// Supabase の持ち時間を超えないよう、全体で45秒を上限にする。無料枠の上限(429)はやり直しても無駄なので、すぐ知らせる
 // deno-lint-ignore no-explicit-any
-async function gemini(imageB64: string, mime: string, prompt: string, schema: unknown): Promise<any> {
+async function gemini(imageB64: string, mime: string, prompt: string, schema: unknown, budget = 45_000): Promise<any> {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) throw new Error('GEMINI_API_KEY が設定されていません');
   const models = [...new Set([Deno.env.get('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(Boolean) as string[])];
@@ -111,36 +111,104 @@ async function gemini(imageB64: string, mime: string, prompt: string, schema: un
     contents: [{ parts: [{ inline_data: { mime_type: mime || 'image/jpeg', data: imageB64 } }, { text: prompt }] }],
     generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
   });
-  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-  let last = '', busy = false;
+  const end = Date.now() + budget, left = () => end - Date.now();
+  const tries: string[] = [];
   for (const m of models) {
-    for (let a = 0; a < 3; a++) {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body,
-      });
-      if (res.status === 404) { last = `モデル ${m} が見つかりません`; break; }
+    for (let a = 0; a < 2 && left() > 4000; a++) {
+      let res: Response;
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body, signal: AbortSignal.timeout(Math.min(25_000, left())),
+        });
+      } catch { tries.push(`${m}:時間切れ`); break; }
+      if (res.status === 404) { await res.body?.cancel(); tries.push(`${m}:見つからない`); break; }
       if (res.status === 429) throw new Error('Gemini の無料枠の上限に達しました。しばらくしてから試してください');
-      if ([500, 502, 503, 504].includes(res.status)) { busy = true; const t = (await res.text()).replace(/\s+/g, ' '); last = `${m}:${res.status} ${(t.match(/"message": ?"([^"]+)/)?.[1] || t).slice(0, 160)}`; if (a < 2) await wait(1500 * (a + 1)); continue; }
+      if (res.status >= 500) {
+        const t = (await res.text()).replace(/\s+/g, ' ');
+        tries.push(`${m}:${res.status} ${(t.match(/"message": ?"([^"]+)/)?.[1] || t).slice(0, 120)}`);
+        if (a === 0 && left() > 8000) await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
       if (!res.ok) throw new Error(`Gemini の呼び出しに失敗しました(${res.status}): ${(await res.text()).slice(0, 200)}`);
       const data = await res.json();
       const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
       return JSON.parse(text);
     }
+    if (left() <= 4000) break;
   }
-  throw new Error(busy ? `Gemini が混み合っていて読み取れませんでした。数分おいてから、もう一度試してください(最後の返事 ${last})` : (last || 'Gemini を呼び出せませんでした'));
+  throw new Error(`Gemini から読み取りの返事がもらえませんでした。数分おいてから、もう一度試してください(${tries.slice(-3).join(' / ') || '時間切れ'})`);
 }
-export const readReceipt = async (imageB64: string, mime: string) => normalize(await gemini(imageB64, mime, PROMPT, SCHEMA));
+export const readReceipt = async (imageB64: string, mime: string, budget?: number) => normalize(await gemini(imageB64, mime, PROMPT, SCHEMA, budget));
 export const readPaper = async (imageB64: string, mime: string, today: string) => normalizePaper(await gemini(imageB64, mime, paperPrompt(today), PAPER_SCHEMA));
+
+// ---------- 読み取り待ち(混み合いで読めなかった写真を、あとで読み直す) ----------
+// サーバー用の鍵:新しい形(SUPABASE_SECRET_KEYS)を先に使い、なければ古い形(SUPABASE_SERVICE_ROLE_KEY)を使う
+function serverKey() {
+  try {
+    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}');
+    const k = keys.default || Object.values(keys)[0];
+    if (typeof k === 'string' && k) return k;
+  } catch (_) { /* 形が違えば古い鍵へ */ }
+  const old = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!old) throw new Error('サーバー用の鍵が見つかりません');
+  return old;
+}
+const serverDb = () => createClient(Deno.env.get('SUPABASE_URL')!, serverKey(), { auth: { persistSession: false } });
+const toB64 = (u: Uint8Array) => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+// 読み直してよい失敗(混み合い・時間切れ・無料枠)か
+export const retryable = (m: string) => /混み合|返事|時間切れ|無料枠/.test(m);
+// 読み直しの間隔:10分→20分→40分…(最大6時間)。12回で自動の読み直しを止める
+export const nextWait = (tries: number) => Math.min(360, 10 * 2 ** (tries - 1));
+// deno-lint-ignore no-explicit-any
+async function processItem(db: any, q: any, budget = 40_000) {
+  const { data: blob, error: de } = await db.storage.from('receipts').download(q.path);
+  if (de || !blob) {
+    await db.from('receipt_queue').update({ status: 'failed', last_error: '写真が見つかりません' }).eq('id', q.id);
+    return { ok: false, error: '写真が見つかりません' };
+  }
+  try {
+    const r = await readReceipt(toB64(new Uint8Array(await blob.arrayBuffer())), 'image/jpeg', budget);
+    const { data, error } = await db.rpc('receipt_add_as', { p_user: q.owner, p_store: r.store, p_date: r.date, p_total: r.total, p_items: r.items, p_time: r.time });
+    if (error) throw new Error(error.message);
+    if (data?.id) await db.from('card_inbox').update({ receipt_path: q.path }).eq('id', data.id);
+    await db.from('receipt_queue').delete().eq('id', q.id);
+    return { ok: true, merged: data?.merged, id: data?.id, receipt: r };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e), tries = (q.tries || 0) + 1;
+    await db.from('receipt_queue').update({
+      tries, last_error: msg.slice(0, 300), status: retryable(msg) && tries < 12 ? 'waiting' : 'failed',
+      next_at: new Date(Date.now() + nextWait(tries) * 60e3).toISOString(),
+    }).eq('id', q.id);
+    return { ok: false, error: msg };
+  }
+}
 
 if (typeof Deno !== 'undefined' && Deno.serve) Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
+    const body = await req.json().catch(() => ({}));
+    if (body.mode === 'queue') {   // 10分ごとの時計から(合言葉で確かめる)。1回に2枚まで読み直す
+      const db = serverDb();
+      const { data: cfg } = await db.from('push_config').select('cron_secret').eq('id', 1).single();
+      if (!cfg?.cron_secret || req.headers.get('x-kurashi-cron') !== cfg.cron_secret) return json({ error: '合言葉が違います' }, 401);
+      const { data: qs } = await db.from('receipt_queue').select('*').eq('status', 'waiting').lte('next_at', new Date().toISOString()).order('next_at').limit(2);
+      const out = [];
+      for (const q of qs || []) out.push(await processItem(db, q));
+      return json({ ok: true, tried: out.length, done: out.filter(x => x.ok).length });
+    }
     const auth = req.headers.get('Authorization') || '';
     const apikey = req.headers.get('apikey') || Deno.env.get('SUPABASE_ANON_KEY') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, apikey, { global: { headers: { Authorization: auth } } });
     const { data: { user } } = await sb.auth.getUser(auth.replace(/^Bearer\s+/i, ''));
     if (!user) return json({ error: 'ログインが必要です' }, 401);
-    const { image, mime, mode } = await req.json();
+    const { image, mime, mode } = body;
+    if (mode === 'retry') {   // アプリの「今すぐ読み直す」から(本人の読み取り待ちだけ)
+      const db = serverDb();
+      const { data: q } = await db.from('receipt_queue').select('*').eq('id', body.id).eq('owner', user.id).maybeSingle();
+      if (!q) return json({ error: '読み取り待ちが見つかりません' }, 404);
+      const r = await processItem(db, q, 45_000);
+      return json(r.ok ? { ok: true, merged: r.merged, id: r.id, receipt: r.receipt } : { error: r.error });
+    }
     if (mode === 'version') return json({ ok: true, version: VERSION, gemini: !!Deno.env.get('GEMINI_API_KEY') });   // 状態チェック用
     if (!image || image.length > 8_000_000) return json({ error: '写真がないか、大きすぎます' }, 400);
     if (mode === 'paper') {   // 紙から予定・やること:読み取って返すだけ

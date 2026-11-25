@@ -1,0 +1,14 @@
+# 暮らし帳:GitHub に上げるたびに一括チェック(tools/check.mjs)を走らせる(2026-11-25 追加)
+# 不合格なら GitHub の「Actions」に赤い×が付き、登録したメールにも知らせが届く
+name: 一括チェック
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 一括チェック
+        run: node tools/check.mjs

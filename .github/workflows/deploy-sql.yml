@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: 一括チェック(不合格なら、ここで止めて反映しない)
+        run: node tools/check.mjs
       - name: 準備ができているか
         env: { DB_URL: '${{ secrets.SUPABASE_DB_URL }}' }
         run: |

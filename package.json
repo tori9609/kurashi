@@ -1,0 +1,9 @@
+{
+  "name": "kurashi",
+  "private": true,
+  "type": "module",
+  "description": "ふたりの暮らし帳。npm を入れなくても node だけでチェックできる",
+  "scripts": {
+    "check": "node tools/check.mjs"
+  }
+}

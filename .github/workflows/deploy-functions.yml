@@ -14,6 +14,8 @@ jobs:
       PROJECT_REF: '${{ secrets.SUPABASE_PROJECT_REF }}'
     steps:
       - uses: actions/checkout@v4
+      - name: 一括チェック(不合格なら、ここで止めて反映しない)
+        run: node tools/check.mjs
       - name: 準備ができているか
         run: |
           if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$PROJECT_REF" ]; then echo "::error::GitHub の Secrets に SUPABASE_ACCESS_TOKEN と SUPABASE_PROJECT_REF が要ります(手順書の「自動で反映する準備」)"; exit 1; fi
